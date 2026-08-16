@@ -13,6 +13,8 @@ edge cases, and the real 5-round slice for the "does this hold up on an actual
 demo" pass.
 """
 
+import json
+
 import pytest
 
 from conftest import fplayer, frame, kill, make_match
@@ -422,6 +424,89 @@ class TestRealSlice:
 
 
 # ---------------------------------------------------------------------------
+class TestSnapshot:
+    """
+    The live "ask about this moment" endpoint's view of one tick. Its defining
+    property is what it LEAVES OUT.
+    """
+
+    def _match(self):
+        fr = frame(192,
+                   fplayer("me", 0, 0, "ct", place=0, hp=80),
+                   fplayer("mate", 400, 0, "ct", place=1),
+                   fplayer("farmate", 2000, 0, "ct", place=2),
+                   fplayer("e1", 3000, 0, "t", place=3),
+                   fplayer("e2", 3100, 0, "t", place=3),
+                   fplayer("deadenemy", 50, 0, "t", place=3, hp=0, alive=False),
+                   rnd=1)
+        m = make_match([kill(150, 1, "mate", "deadenemy", aside="ct", vside="t",
+                             vplace="Palace", aplace="Connector")],
+                       [fr], place_names=["MidDoors", "Middle", "Main", "Palace"],
+                       pov="me")
+        return m
+
+    def test_reports_my_own_callout_and_health(self, analyze_mod):
+        s = analyze_mod.snapshot(self._match(), 200)
+        assert s["my_place"] == "MidDoors" and s["my_hp"] == 80 and s["alive"] is True
+
+    def test_teammates_come_with_callouts_and_distances(self, analyze_mod):
+        s = analyze_mod.snapshot(self._match(), 200)
+        assert [m["name"] for m in s["teammates"]] == ["mate", "farmate"]
+        assert s["teammates"][0]["place"] == "Middle"
+        assert s["teammates"][0]["dist"] == 400
+
+    def test_teammates_are_sorted_nearest_first(self, analyze_mod):
+        s = analyze_mod.snapshot(self._match(), 200)
+        dists = [m["dist"] for m in s["teammates"]]
+        assert dists == sorted(dists)
+
+    def test_enemy_positions_are_never_included(self, analyze_mod):
+        """
+        The whole point. Coaching a decision using information the player
+        couldn't have had is worse than not coaching it - it produces advice
+        that is unfollowable in the moment it describes.
+
+        Asserted against the enemies' actual CALLOUT rather than their names,
+        because a name can leak legitimately (the round history says who died)
+        while a position can't. An earlier version of this test checked for the
+        names and passed against a build that leaked positions.
+        """
+        s = analyze_mod.snapshot(self._match(), 200)
+        assert s["enemies_alive"] == 2
+        assert "enemies" not in s
+        # "Palace" is where both living enemies are standing, and it appears
+        # nowhere else in this fixture's frame data.
+        blob = json.dumps(s["teammates"]) + json.dumps(
+            {k: v for k, v in s.items() if k != "round_so_far"})
+        assert "Palace" not in blob
+
+    def test_an_enemy_is_never_described_even_as_a_teammate(self, analyze_mod):
+        """Guards the side test itself, not just the output shape."""
+        s = analyze_mod.snapshot(self._match(), 200)
+        assert {m["name"] for m in s["teammates"]} == {"mate", "farmate"}
+
+    def test_dead_players_count_for_neither_side(self, analyze_mod):
+        s = analyze_mod.snapshot(self._match(), 200)
+        assert s["enemies_alive"] == 2 and s["teammates_alive"] == 2
+
+    def test_round_history_stops_at_the_asked_tick(self, analyze_mod):
+        """Nothing after this instant - the player can't see the future either."""
+        m = self._match()
+        m["kills"].append(kill(9000, 1, "e1", "me", aside="t", vside="ct",
+                               vplace="MidDoors", aplace="Middle"))
+        s = analyze_mod.snapshot(m, 200)
+        assert [k["victim"] for k in s["round_so_far"]] == ["deadenemy"]
+
+    def test_history_marks_whose_loss_each_kill_was(self, analyze_mod):
+        s = analyze_mod.snapshot(self._match(), 200)
+        assert s["round_so_far"][0]["mine"] is False
+
+    def test_returns_none_when_there_are_no_frames(self, analyze_mod):
+        m = self._match()
+        m["frames"] = []
+        assert analyze_mod.snapshot(m, 200) is None
+
+
 class TestMalformedInput:
     def test_no_frames_at_all_still_classifies_deaths(self, analyze_mod):
         """Positions are optional context, not a precondition."""

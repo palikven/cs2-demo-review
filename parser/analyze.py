@@ -382,6 +382,76 @@ def isolation_profile(deaths, kills):
     return prof
 
 
+def snapshot(match, tick, player=None):
+    """
+    The state of the map at one instant, in callouts.
+
+    This is what the live "should I peek here?" endpoint hands the model. Same
+    rule as everywhere else: named places and counts, no coordinates. Distances
+    are included because they're a measurement of spacing, not a position - the
+    model can't reconstruct the map from "your nearest teammate is 400 units
+    away", but it can tell you nobody is close enough to trade you.
+    """
+    idx = MatchIndex(match)
+    name = player or match.get("pov")
+    fr = idx.frame_at(tick)
+    if not fr:
+        return None
+
+    rnd = fr.get("round")
+    living = [p for p in (fr.get("players") or [])
+              if p.get("a") is not False and (p.get("hp") is None or p["hp"] > 0)]
+
+    me = next((p for p in (fr.get("players") or []) if p.get("n") == name), None)
+    my_side = (me or {}).get("t")
+    my_alive = me is not None and me.get("a") is not False and (me.get("hp") or 0) > 0
+
+    # Enemies are COUNTED, never described. The player didn't know where they
+    # were, so neither does the coach - advice built on the enemy's actual
+    # position is unfollowable in the moment it's about ("you should have known
+    # he was in Connector" is not coaching).
+    #
+    # Note this is enforced by never building the enemy records at all, rather
+    # than by building them and stripping fields afterwards. Same result, but
+    # there is no populated structure sitting around for a later edit to
+    # accidentally include.
+    teammates, enemies_alive = [], 0
+    for p in living:
+        if p.get("n") == name:
+            continue
+        if not _same_side(p.get("t"), my_side):
+            enemies_alive += 1
+            continue
+        entry = {"name": p.get("n"), "place": idx.place_of(p), "hp": p.get("hp")}
+        if me is not None and me.get("x") is not None and p.get("x") is not None:
+            entry["dist"] = round(dist2d(me["x"], me["y"], p["x"], p["y"]), 0)
+        teammates.append(entry)
+
+    prior = [k for k in idx.by_round.get(rnd, [])
+             if k["tick"] <= tick and is_player_kill(k)]
+    return {
+        "player": name,
+        "round": rnd,
+        "t": idx.seconds_into_round(rnd, tick),
+        "alive": my_alive,
+        "my_place": idx.place_of(me) if me else None,
+        "my_hp": (me or {}).get("hp"),
+        "my_side": my_side,
+        "teammates": sorted(teammates, key=lambda x: x.get("dist") or 1e9),
+        "enemies_alive": enemies_alive,
+        "teammates_alive": len(teammates),
+        "post_plant": idx.is_post_plant(rnd, tick),
+        "round_so_far": [
+            {"t": idx.seconds_into_round(rnd, k["tick"]),
+             "attacker": k["attacker"], "victim": k["victim"],
+             "victim_place": k.get("victim_place"),
+             "attacker_place": k.get("attacker_place"),
+             "mine": _same_side(k.get("victim_side"), my_side)}
+            for k in prior
+        ],
+    }
+
+
 def classify_kill(kill, idx):
     """The winning half of a duel - only the fields the isolation gap needs."""
     if not is_player_kill(kill):

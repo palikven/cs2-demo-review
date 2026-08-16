@@ -81,6 +81,18 @@
   .tag.warn{border-color:var(--t);color:var(--t)}
   .tip{border-left:2px solid var(--accent);padding-left:8px;margin-top:8px;font-size:12.5px;line-height:1.45}
   .tip .vd{color:var(--ink-dim);margin-bottom:4px}
+  /* ask-the-coach */
+  #ask{display:none;gap:6px;margin-bottom:16px}
+  #ask.on{display:flex}
+  #ask input{flex:1;min-width:0;background:var(--panel-2);border:1px solid var(--line);
+    border-radius:6px;color:var(--ink);font-family:var(--sans);font-size:12.5px;padding:8px 10px}
+  #ask input:focus{outline:none;border-color:var(--accent)}
+  #ask button{font-family:var(--mono);font-size:11px;background:var(--accent);color:#06120c;
+    border:none;border-radius:6px;padding:0 12px;cursor:pointer;font-weight:700}
+  #ask button:disabled{opacity:.45;cursor:default}
+  .answer{border-left:2px solid var(--accent);padding-left:9px;margin-bottom:16px;
+    font-size:12.5px;line-height:1.5}
+  .answer .q{color:var(--ink-faint);font-family:var(--mono);font-size:11px;margin-bottom:5px}
   .muted{color:var(--ink-faint);font-size:12px;line-height:1.5}
   .muted code{color:var(--accent);background:var(--panel-2);padding:1px 5px;border-radius:3px;
     font-family:var(--mono);font-size:11px}
@@ -165,6 +177,11 @@
 
   <aside>
     <div class="rail-h">Coach</div>
+    <form id="ask" autocomplete="off">
+      <input id="ask-q" maxlength="500" placeholder="Ask about this moment…">
+      <button type="submit" id="ask-go">ASK</button>
+    </form>
+    <div id="answer"></div>
     <div id="coach"></div>
     <div class="rail-h">Roster</div>
     <div class="roster" id="roster"></div>
@@ -276,6 +293,7 @@ async function loadMatch(data){
   // Sidecars, both optional. Cleared first so switching matches can't leave
   // the previous match's coaching on screen.
   ANALYSIS = null; COACH = null; coachKey = null;
+  MATCH_NAME = data._name || null;
   if(data._name) loadSidecars(data._name);
 
   buildRounds();
@@ -676,6 +694,49 @@ function currentRound(){
   const f=frames[i];
   return f.round!=null?f.round:f._r;
 }
+function currentTick(){
+  if(!frames.length) return null;
+  const i=Math.max(0,Math.min(Math.floor(pos),frames.length-1));
+  const fr=frames[i], nx=frames[i+1];
+  if(!nx||fr.tick==null||nx.tick==null) return fr.tick;
+  return Math.round(lerp(fr.tick,nx.tick,pos-i));
+}
+
+// ---- ask the coach ----
+// Only shown when server/app.py is running WITH a key. Served as a plain
+// static file there's no endpoint to call, and offering a button that can only
+// fail is worse than not offering one.
+let MATCH_NAME=null;
+async function initAsk(){
+  const st=await fetch("/api/status").then(r=>r.ok?r.json():null).catch(()=>null);
+  if(!st||!st.llm) return;
+  $("#ask").classList.add("on");
+  $("#ask-q").placeholder=`Ask about this moment (${st.model})…`;
+}
+$("#ask").onsubmit=async e=>{
+  e.preventDefault();
+  const q=$("#ask-q").value.trim();
+  if(!q||!MATCH_NAME) return;
+  const tick=currentTick();
+  const btn=$("#ask-go"), out=$("#answer");
+  btn.disabled=true; btn.textContent="…";
+  // Pause: the answer is about ONE tick, and letting playback run means the
+  // reply lands describing a moment that's already gone.
+  playing=false; $("#play").textContent="▶";
+  out.innerHTML=`<div class="answer"><div class="q">${esc(q)}</div>thinking…</div>`;
+  try{
+    const r=await fetch("/api/ask",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({match:MATCH_NAME,player:ANALYSIS?.player||M.pov,
+                           tick,question:q})});
+    const d=await r.json();
+    out.innerHTML=`<div class="answer"><div class="q">R${d.round??"?"} ${
+      d.t!=null?d.t+"s":""} · ${esc(q)}</div>${esc(d.answer||d.error||"no answer")}</div>`;
+    if(r.ok) $("#ask-q").value="";
+  }catch(err){
+    out.innerHTML=`<div class="answer"><div class="q">${esc(q)}</div>${esc(String(err))}</div>`;
+  }finally{ btn.disabled=false; btn.textContent="ASK"; }
+};
 
 // Re-arm the kill cursor at the current position without firing anything.
 // Used after a seek or a round change so we don't replay every earlier kill.
@@ -863,6 +924,7 @@ fetch(CAL_URL).then(r=>r.json()).then(c=>{CAL=c;
   (want ? tryLoad(want) : Promise.resolve(null))
     .then(d => d || tryLoad("_sample_mirage"))
     .then(d => { if(d) loadMatch(d); });
+  initAsk();
 }).catch(()=>{ $("#empty").innerHTML="<div>map_calibration.json failed to load</div>";});
 </script>
 </body>
