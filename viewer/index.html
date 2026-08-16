@@ -375,7 +375,15 @@ async function loadMatch(data){
 // the voice needs its own extraction pass.
 function loadSidecars(name){
   fetch(`../data/${name}_analysis.json`).then(r=>r.ok?r.json():null).catch(()=>null)
-    .then(a=>{ if(a){ ANALYSIS=a; coachKey=null; buildRounds(); dirty=true; draw(); }});
+    .then(a=>{ if(a){
+      ANALYSIS=a; coachKey=null; buildRounds();
+      // The stat panel and the team rows are built before this arrives, and
+      // both read swing out of it - without re-rendering them the swing tile
+      // shows a dash for the whole session.
+      if(selected) selectPlayer(selected);
+      teamsKey="";
+      dirty=true; draw();
+    }});
   fetch(`../data/${name}_coach.json`).then(r=>r.ok?r.json():null).catch(()=>null)
     .then(c=>{ if(c){ COACH=c; coachKey=null; buildRounds(); dirty=true; draw(); }});
   loadVoice(name);
@@ -472,12 +480,18 @@ function selectPlayer(name){
   // 1.00 is the league-average player, so colouring either side of it is the
   // whole point of the metric.
   const rat = st.rating;
+  // Swing is per-player and comes from the analysis sidecar, not the match
+  // JSON - it needs the frames to compute and lives with the death review.
+  const sw = (ANALYSIS?.swing_all||{})[name];
+  const spr = sw?.swing_per_round_pct;
   const cells=[
     ["v",(rat!=null?rat.toFixed(2):"–"),"Rating 1.0",
       rat==null?"":(rat>=1.10?"good":(rat<0.95?"bad":""))],
+    ["v",(spr!=null?(spr>0?"+":"")+spr.toFixed(1)+"%":"–"),"Swing / round",
+      spr==null?"":(spr>=1?"good":(spr<=-1?"bad":""))],
     ["v",(st.kast!=null?st.kast+"%":"–"),"KAST", st.kast>=70?"good":(st.kast<60?"bad":"")],
-    ["v",`${st.kills??0}/${st.deaths??0}/${st.assists??0}`,"K / D / A"],
     ["v",(st.adr!=null?st.adr:"–"),"ADR", st.adr>=80?"good":(st.adr!=null&&st.adr<60?"bad":"")],
+    ["v",`${st.kills??0}/${st.deaths??0}/${st.assists??0}`,"K / D / A"],
     ["v",(st.kd??0),"K/D"],
     ["v",(st.hs_pct??0)+"%","HS %", st.hs_pct>=50?"good":""],
     ["v",(st.entry_win_pct??0)+"%","Entry win", st.entry_win_pct>=50?"good":st.entry_attempts?"bad":""],
@@ -707,7 +721,10 @@ function buildTeams(fr){
     if(rEl && st.rating!=null){
       rEl.textContent=st.rating.toFixed(2);
       rEl.className="rat "+(st.rating>=1.10?"good":(st.rating<0.95?"bad":""));
-      rEl.title=`HLTV Rating 1.0 · KAST ${st.kast}% · ADR ${st.adr}`;
+      const sw=(ANALYSIS?.swing_all||{})[n];
+      rEl.title=`HLTV Rating 1.0 · KAST ${st.kast}% · ADR ${st.adr}`
+        + (sw ? `\nRound swing ${sw.swing_per_round_pct>0?"+":""}`
+                + `${sw.swing_per_round_pct}%/round (our model, not HLTV's)` : "");
     }
     row.onclick=()=>selectPlayer(n);
   });

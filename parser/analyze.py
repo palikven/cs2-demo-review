@@ -517,7 +517,7 @@ def analyze(match, player=None):
     # Swing: what each death actually cost the team, rather than just that it
     # happened. Attached by tick so a death card can say "this one cost 34% of
     # the round" instead of leaving the reader to judge from the alive counts.
-    swing_by_tick, swing_totals = {}, {}
+    swing_by_tick, swing_totals, swing_all = {}, {}, {}
     try:
         import swing as swingmod
         for s in swingmod.compute_swing(match):
@@ -525,7 +525,11 @@ def analyze(match, player=None):
                 swing_by_tick[s["tick"]] = s
             if s["attacker"] == name and s["attacker"] != s["victim"]:
                 swing_by_tick.setdefault(s["tick"], s)
-        swing_totals = swingmod.per_player(match).get(name, {})
+        # Everyone's, not just the reviewed player's - the viewer shows swing
+        # beside each name in the team panel, and computing it for one player
+        # and discarding the other nine was wasted work anyway.
+        swing_all = swingmod.per_player(match)
+        swing_totals = swing_all.get(name, {})
     except Exception as exc:                       # noqa: BLE001
         # The review is useful without swing; losing it should not lose the
         # rest of the analysis.
@@ -547,6 +551,7 @@ def analyze(match, player=None):
         "map": match.get("map"),
         "rounds_played": (match.get("stats") or {}).get("rounds_played"),
         "swing": swing_totals,
+        "swing_all": swing_all,
         "deaths": deaths,
         "kills": kills,
         "death_places": places,
