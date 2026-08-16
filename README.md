@@ -54,9 +54,20 @@ thing as a text dump in the terminal.
 python server/app.py
 # then open http://localhost:8000/viewer/index.html?match=match
 ```
-Round buttons, spacebar to play/pause, arrows to step, `C` toggles callouts.
 Rounds you died in get a red dot. Scrub near a death and the coach panel shows
-what happened; a death you survived says so.
+what happened; a round you survived says so.
+
+| Key | |
+|---|---|
+| `Space` | play / pause |
+| `←` `→` | step one sample (~0.5s) |
+| `C` | callout labels on/off |
+| `U` | utility on/off |
+
+**Utility** draws smokes and molotovs as areas for exactly as long as they were
+actually up, flashes and HEs as brief pops where they went off, the flight path
+of every grenade thrown, and a planted bomb pulsing until it's defused or
+explodes. It's drawn under the players, so smoke never hides a dot.
 
 > Serve it rather than opening the file directly — browsers block `fetch()` of
 > the radar and calibration from `file://`. `run_viewer.bat` does all of this.
@@ -116,6 +127,10 @@ post-plant · weapon, range, and whether it came through smoke or a wall
 
 **Rolled up:** where you keep dying and from which angles · deaths by round
 phase · how isolated you are when you die versus when you win
+
+**Utility (rendered, not yet analysed):** every smoke and molotov with its real
+lifetime · flash and HE detonations · throw arcs · bomb plants, defuses and
+detonations
 
 ## If parsing errors on column names
 
