@@ -160,9 +160,32 @@ the selected-player panel. Rating 1.0 is HLTV's published formula, so the number
 is the real one — 1.00 is an average player. It's also fed to the AI layers,
 which otherwise rank players by raw kills.
 
-A `rating2_est` field estimates Rating 2.0, but HLTV never published that
-formula; it's a community regression and is named to say so. Treat it as
-indicative, and quote Rating 1.0 if you need a number you can defend.
+**Round swing:** every death carries what it cost the round in win probability
+— a death at 5v5 is the round, one at 1v3 post-plant was already lost. Shown on
+each death card and summed per player.
+
+```
+python parser/swing.py data/2v5.json              # per-player swing
+python parser/swing.py data/2v5.json --calibrate  # did the model predict this match?
+```
+
+### On HLTV's ratings
+
+HLTV replaced Rating 2.0 with 2.1 and then, in August 2025, with **Rating 3.0**,
+whose largest component (~33%) is **Round Swing**. They publish the concept and
+the component weights but not the formula — the win-probability model behind
+Round Swing is fitted on their whole match database and is proprietary.
+
+So this project computes:
+
+| | what it is |
+|---|---|
+| **Rating 1.0** | HLTV's published formula. The real number. |
+| **Round swing** | *Our* win-probability model, every coefficient written down in `parser/swing.py`, with a `--calibrate` mode that reports how well it predicted your own matches. Not HLTV's figure and won't match it. |
+| `rating2_legacy_est` | A community regression against the retired Rating 2.0. Kept only for comparison with archived HLTV pages. |
+
+Rating 3.0 itself is not computed here and can't be faithfully — quote Rating
+1.0 when you need a number you can defend.
 
 **Utility (rendered, not yet analysed):** every smoke and molotov with its real
 lifetime · flash and HE detonations · throw arcs · bomb plants, defuses and

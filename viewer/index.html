@@ -65,6 +65,11 @@
   .gi-gun{height:13px} .gi-pistol{height:10px;opacity:.6}
   .gi-nade{height:11px} .gi-c4{height:12px;opacity:.95}
   .gi-kit{font-size:11px;color:var(--ct);opacity:.9;line-height:1}
+  /* what a death cost the round, in win probability */
+  .cost{font-family:var(--mono);font-size:10px;color:var(--danger);
+        margin-right:8px;opacity:.85}
+  .cost.big{font-weight:600;opacity:1}
+  .cost.none{color:var(--ink-faint)}
   /* match rating sits next to the name; 1.00 is the average player */
   .rat{font-family:var(--mono);font-size:10px;color:var(--ink-faint);margin-left:6px;font-weight:400}
   .rat.good{color:var(--accent)} .rat.bad{color:var(--danger)}
@@ -1129,9 +1134,16 @@ function deathCard(d, live){
   const mate = d.nearest_mate!=null
     ? `nearest teammate <b>${Math.round(d.nearest_mate)}u</b>`
     : `<b>last alive</b>`;
+  // What the death actually cost the round. A death at 1v3 post-plant is
+  // already lost and says nothing; one at 5v5 is the round.
+  const cost = d.swing_cost_pct;
+  const costHtml = cost==null ? ""
+    : (cost < 0.05
+        ? `<span class="cost none" title="The round was already decided">decided</span>`
+        : `<span class="cost${cost>=20?" big":""}" title="Estimated round-win probability lost (our model, not HLTV's)">-${cost.toFixed(0)}%</span>`);
   return `<div class="card${live?" live":""}">
     <div class="hd"><span>R${d.round} · ${d.t}s${live?" · <b>DEATH</b>":""}</span>
-      <span>${d.alive_own}v${d.alive_enemy}</span></div>
+      <span>${costHtml}${d.alive_own}v${d.alive_enemy}</span></div>
     <div class="where">${esc(calloutLabel(d.victim_place||"?"))}
       <i>&lt;-</i> ${esc(calloutLabel(d.attacker_place||"?"))}
       <i>·</i> ${esc(d.weapon||"?")}</div>

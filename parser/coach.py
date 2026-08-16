@@ -114,6 +114,15 @@ def build_facts(a, match):
         lines.append(f"That is rank {rank} of {len(rated)} on the server "
                      f"(best {rated[-1][0]}, worst {rated[0][0]}).")
 
+    sw = a.get("swing") or {}
+    if sw.get("swing_per_round_pct") is not None:
+        lines.append(
+            f"Round swing: {sw['swing_per_round_pct']:+.2f}% per round "
+            f"(gained {sw['swing_gained_pct']:.0f}%, lost "
+            f"{sw['swing_lost_pct']:.0f}% across the match). This is OUR model "
+            f"of round-win probability, not HLTV's Rating 3.0 figure - use it "
+            f"to compare deaths against each other, not against HLTV numbers.")
+
     lines += [
         "",
         "DEATHS (each line is one death; `tick` is its id - copy it exactly)",

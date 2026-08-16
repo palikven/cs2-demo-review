@@ -269,18 +269,18 @@ class TestRating2Estimate:
         """
         p = self._with_damage(stats_mod)["per_player"]["p"]
         assert p["adr"] is not None, "fixture must exercise the computed branch"
-        assert p["rating2_est"] is not None
+        assert p["rating2_legacy_est"] is not None
         assert "rating2" not in p, "must not look like HLTV's official figure"
 
     def test_the_estimate_is_in_a_believable_range(self, stats_mod):
         p = self._with_damage(stats_mod)["per_player"]["p"]
-        assert 0 < p["rating2_est"] < 3
+        assert 0 < p["rating2_legacy_est"] < 3
 
     def test_the_two_ratings_are_separate_numbers(self, stats_mod):
         """Same player, two different formulas - if they were identical one of
         them is not being computed."""
         p = self._with_damage(stats_mod)["per_player"]["p"]
-        assert p["rating"] != p["rating2_est"]
+        assert p["rating"] != p["rating2_legacy_est"]
 
     def test_it_is_none_without_damage_data(self, compute):
         """ADR is one of its inputs; with no damage there is nothing to
@@ -288,7 +288,7 @@ class TestRating2Estimate:
         ks = [kill(100, 1, "p", "v")]
         s = compute(ks, player_names=["p", "v"], round_nums=[1])
         assert only(s, "p")["adr"] is None
-        assert only(s, "p")["rating2_est"] is None
+        assert only(s, "p")["rating2_legacy_est"] is None
 
     def test_the_real_rating_is_still_produced_without_damage(self, compute):
         """Rating 1.0 does not depend on ADR, so it must survive."""

@@ -514,10 +514,39 @@ def analyze(match, player=None):
             h["notable"] = reliable(h["deaths"], total_deaths, min_count=2,
                                     min_frac=0.12, min_sources=1, sources=1)
 
+    # Swing: what each death actually cost the team, rather than just that it
+    # happened. Attached by tick so a death card can say "this one cost 34% of
+    # the round" instead of leaving the reader to judge from the alive counts.
+    swing_by_tick, swing_totals = {}, {}
+    try:
+        import swing as swingmod
+        for s in swingmod.compute_swing(match):
+            if s["victim"] == name:
+                swing_by_tick[s["tick"]] = s
+            if s["attacker"] == name and s["attacker"] != s["victim"]:
+                swing_by_tick.setdefault(s["tick"], s)
+        swing_totals = swingmod.per_player(match).get(name, {})
+    except Exception as exc:                       # noqa: BLE001
+        # The review is useful without swing; losing it should not lose the
+        # rest of the analysis.
+        print(f"[!] swing unavailable ({exc}); continuing without it", file=sys.stderr)
+
+    for d in deaths:
+        s = swing_by_tick.get(d["tick"])
+        if s:
+            d["swing_cost_pct"] = round(100 * s["cost"], 1)
+            d["win_prob_before"] = s["p_before_t"] if d.get("side") == "t" else \
+                round(1 - s["p_before_t"], 4)
+    for k in kills:
+        s = swing_by_tick.get(k.get("tick"))
+        if s and s.get("attacker") == name:
+            k["swing_gain_pct"] = round(100 * s["swing"], 1)
+
     return {
         "player": name,
         "map": match.get("map"),
         "rounds_played": (match.get("stats") or {}).get("rounds_played"),
+        "swing": swing_totals,
         "deaths": deaths,
         "kills": kills,
         "death_places": places,
@@ -574,6 +603,11 @@ def main():
                 f"<- {_fmt_place(d['attacker_place']):<16}",
                 f"{d['weapon'] or '?':<10}",
                 f"{d['alive_own']}v{d['alive_enemy']}"]
+        if d.get("swing_cost_pct") is not None:
+            # A death in an already-decided round genuinely costs nothing;
+            # printing "-0.0%" makes that look like a rounding artefact.
+            cost = d["swing_cost_pct"]
+            bits.append("  decided" if cost < 0.05 else f"{-cost:>6.1f}%")
         tags = [t for t, on in (("opening", d["opening"]), ("untraded", not d["traded"]),
                                 ("repeek", d["repeek"]), ("isolated", d.get("isolated")),
                                 ("post-plant", d["post_plant"])) if on]

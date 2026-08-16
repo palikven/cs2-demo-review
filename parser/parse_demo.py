@@ -46,9 +46,9 @@ DATA_DIR = ROOT / "data"
 #
 # Deliberately NOT requested: active_weapon. It parses fine but the value is a
 # numeric entity id (1392828.0), not a weapon name - useless without a lookup
-# table we don't have. `inventory` carries real weapon names instead; we keep it
-# off the frames (a list per player per tick would dwarf the rest of the file)
-# and read it only on kill events.
+# table we don't have. `inventory` carries real weapon names instead. Putting
+# that list on every frame entry would dwarf the rest of the file, so distinct
+# loadouts are interned once and each entry stores a single index (`eq`).
 EXTRA_PLAYER_PROPS = ["yaw", "pitch", "armor_value", "inventory",
                       "flash_duration", "is_alive", "has_helmet", "has_defuser"]
 
@@ -625,6 +625,16 @@ def parse(demo_path: Path, pov_name: str | None):
         # indexes into loadouts, which indexes into item_names.
         "item_names": item_names,
         "loadouts": loadouts,
+        # Price of the most expensive weapon in each loadout, parallel to
+        # `loadouts`. A player's equipment value is this plus their armour,
+        # which is already on the frame entry - so it stays one number per
+        # distinct loadout rather than one per player per frame.
+        "loadout_values": [
+            max((WEAPON_PRICES.get(item_names[i], 0) for i in l), default=0)
+            for l in loadouts
+        ],
+        "armor_prices": {"vest": ARMOR_PRICE, "helmet_extra": HELMET_EXTRA,
+                         "full_buy": FULL_BUY_VALUE},
         "utility": utility,
         "bomb": bomb_events,
         "stats": stats,
@@ -645,6 +655,48 @@ def parse(demo_path: Path, pov_name: str | None):
 # --------------------------------------------------------------------------
 TRADE_WINDOW_TICKS = 320   # ~5s at 64-tick
 
+# ---- Equipment value ------------------------------------------------------
+# HLTV's Rating 3.0 eco adjustment is defined as "the price of a player's armor
+# plus their most expensive weapon", so that is what this computes rather than
+# the game's own current_equip_value (which also counts the pistol and every
+# grenade, and so rates a full-utility rifler well above a bare AWPer).
+#
+# CS2 buy-menu prices. Only the weapons that can be a player's most expensive
+# are worth listing; anything unknown scores 0 and falls back to the armour,
+# which is the safe direction - it under-rates rather than inventing value.
+WEAPON_PRICES = {
+    # rifles and snipers
+    "AK-47": 2700, "M4A4": 3000, "M4A1-S": 2900, "AWP": 4750,
+    "Galil AR": 1800, "FAMAS": 2050, "AUG": 3300, "SG 553": 3000,
+    "SSG 08": 1700, "G3SG1": 5000, "SCAR-20": 5000,
+    # SMGs
+    "MAC-10": 1050, "MP9": 1250, "MP7": 1500, "MP5-SD": 1500,
+    "UMP-45": 1200, "P90": 2350, "PP-Bizon": 1400,
+    # heavy
+    "Nova": 1050, "XM1014": 2000, "MAG-7": 1300, "Sawed-Off": 1100,
+    "M249": 5200, "Negev": 1700,
+    # pistols
+    "Glock-18": 200, "USP-S": 200, "P2000": 200, "P250": 300,
+    "Five-SeveN": 500, "Tec-9": 500, "CZ75-Auto": 500,
+    "Dual Berettas": 300, "Desert Eagle": 700, "R8 Revolver": 600,
+    "Zeus x27": 200,
+}
+ARMOR_PRICE = 650          # kevlar
+HELMET_EXTRA = 350         # kevlar + helmet is 1000 total
+FULL_BUY_VALUE = 3700      # rifle + kevlar&helmet, the reference "full buy"
+
+
+def equipment_value(items, armor, helmet):
+    """Armor price plus the most expensive weapon, per HLTV's stated rule."""
+    best = 0
+    for it in items or ():
+        best = max(best, WEAPON_PRICES.get(it, 0))
+    kit = 0
+    if armor:
+        kit = ARMOR_PRICE + (HELMET_EXTRA if helmet else 0)
+    return best + kit
+
+
 # ---- HLTV Rating ----------------------------------------------------------
 # Rating 1.0 is HLTV's published formula and these are its published league
 # averages, so the number we produce is the real thing rather than a lookalike.
@@ -655,10 +707,17 @@ AVERAGE_RMK = 1.277        # the weighted multi-kill term below
 # metric reward the round-winning multi-kill over four scattered singles.
 MULTI_KILL_WEIGHTS = {1: 1, 2: 4, 3: 9, 4: 16, 5: 25}
 
-# Rating 2.0's formula has never been published. These coefficients are the
-# widely-used community regression against HLTV's displayed numbers - close in
-# practice, but an ESTIMATE, which is why it is exported under a separate key
-# and always labelled as such. Do not present it as HLTV's own figure.
+# Rating 2.0's formula was never published; these coefficients are the widely
+# used community regression against the numbers HLTV used to display.
+#
+# It is doubly removed from anything current: HLTV replaced 2.0 with 2.1, and
+# then in August 2025 with Rating 3.0, whose largest component is Round Swing
+# (~33%) and whose sub-rating internals are proprietary. So this estimates a
+# formula that is both unpublished AND retired - kept only for comparison with
+# archived HLTV pages, exported under a name that says so, and never to be
+# quoted as HLTV's figure. Rating 1.0 above is the one defensible number here;
+# for impact, use the swing model in swing.py, which is at least ours and
+# documented.
 R2 = {"kast": 0.0073, "kpr": 0.3591, "dpr": -0.5329,
       "impact": 0.2372, "adr": 0.0032, "const": 0.1587}
 IMPACT = {"kpr": 2.13, "apr": 0.42, "const": -0.41}
@@ -824,7 +883,7 @@ def compute_stats(kills, rounds, players, pov, kcols, damages=None):
         if not r:
             s["kast"] = s["kpr"] = s["dpr"] = s["apr"] = 0.0
             s["impact"] = s["rating"] = 0.0
-            s["rating2_est"] = None
+            s["rating2_legacy_est"] = None
             continue
 
         s["kast"] = round(100 * len(kast_rounds[n]) / r, 1)
@@ -846,9 +905,9 @@ def compute_stats(kills, rounds, players, pov, kcols, damages=None):
         s["impact"] = round(IMPACT["kpr"] * s["kpr"]
                             + IMPACT["apr"] * s["apr"] + IMPACT["const"], 3)
         if s["adr"] is None:
-            s["rating2_est"] = None
+            s["rating2_legacy_est"] = None
         else:
-            s["rating2_est"] = round(
+            s["rating2_legacy_est"] = round(
                 R2["kast"] * s["kast"] + R2["kpr"] * s["kpr"]
                 + R2["dpr"] * s["dpr"] + R2["impact"] * s["impact"]
                 + R2["adr"] * s["adr"] + R2["const"], 3)
