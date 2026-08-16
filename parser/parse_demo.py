@@ -26,6 +26,7 @@ Design notes
 
 import argparse
 import json
+import math
 import statistics
 import sys
 from pathlib import Path
@@ -54,6 +55,28 @@ EXTRA_PLAYER_PROPS = ["yaw", "pitch", "armor_value", "inventory",
 # A callout label drawn from fewer samples than this is somebody clipping a
 # corner, not a place anyone played. Drawing it just litters the radar.
 MIN_PLACE_SAMPLES = 20
+
+# Every grenade entity awpy reports, mapped to the short kind the viewer draws.
+# Both the "Grenade" and "Projectile" spellings show up in grenade_type; only
+# the projectile rows carry positions, which is what we want anyway.
+GRENADE_KINDS = {
+    "CSmokeGrenadeProjectile": "smoke",
+    "CMolotovProjectile": "fire",
+    "CFlashbangProjectile": "flash",
+    "CHEGrenadeProjectile": "he",
+    "CDecoyProjectile": "decoy",
+}
+
+# Throw arcs are sampled every tick, which is far finer than anyone can see on
+# a 900px radar. Keep every Nth point (plus both ends) - the arc still reads as
+# an arc and the payload stays small.
+THROW_EVERY_TICKS = 4
+
+# A projectile that moves less than this between consecutive ticks has come to
+# rest, and everything after it is the entity sitting on the floor for the rest
+# of its life. Smoke projectiles in particular persist for the full 18s burn,
+# which is why 75% of all grenade rows belong to smokes.
+AT_REST_UNITS = 1.0
 
 
 # --------------------------------------------------------------------------
@@ -91,6 +114,168 @@ def clean_place(v):
         return None
     s = str(v).strip()
     return s or None
+
+
+def round_of(tick, round_rows):
+    """Which round a loose tick belongs to. Some raw event tables have no
+    round_num of their own (flashbang_detonate, hegrenade_detonate)."""
+    if tick is None:
+        return None
+    for r in round_rows:
+        start = r.get("start")
+        end = r.get("official_end") or r.get("end")
+        if start is not None and end is not None and start <= tick <= end:
+            return r.get("round_num")
+    return None
+
+
+def timed_utility(rows, default_seconds, round_rows, tickrate):
+    """
+    Normalise a smoke/inferno table into {s,e,x,y,r,by,side} entries.
+
+    THE trap in this whole feature lives here. dem.smokes and dem.infernos each
+    carry BOTH `thrower_X/Y/Z` and `X/Y/Z`. The thrower columns are where the
+    player was standing - a median of ~800 units from where the grenade
+    actually landed - and `X/Y` is the detonation point. Reading the wrong pair
+    still produces a perfectly well-formed table that renders happily, with
+    every smoke drawn on top of whoever threw it. Nothing but a human looking
+    at the map would notice, which is exactly why it's pinned by a test.
+
+    Split out from parse_utility() so it can be tested without an awpy Demo.
+    """
+    out = []
+    for r in rows:
+        if r.get("X") is None or r.get("Y") is None:
+            continue
+        start = int(r["start_tick"])
+        end = r.get("end_tick")
+        if end is None:
+            # No "expired" event: the smoke was still up when the round ended,
+            # so the demo never records it going out. Fall back to its nominal
+            # duration and clamp to the end of the round - without this the
+            # entry is dropped, and a smoke that covered the whole retake
+            # simply never renders.
+            rnd = r.get("round_num")
+            end = start + int(default_seconds * tickrate)
+            rr = next((x for x in (round_rows or [])
+                       if x.get("round_num") == rnd), None)
+            if rr:
+                cap = rr.get("official_end") or rr.get("end")
+                if cap is not None:
+                    end = min(end, int(cap))
+        ev = {
+            "s": start,
+            "e": int(end),
+            "x": round(float(r["X"]), 1),
+            "y": round(float(r["Y"]), 1),
+            "r": r.get("round_num"),
+        }
+        if r.get("thrower_name") is not None:
+            ev["by"] = r["thrower_name"]
+        if r.get("thrower_side") is not None:
+            ev["side"] = r["thrower_side"]
+        out.append(ev)
+    return out
+
+
+def parse_utility(dem, round_rows, side_by_round, tickrate=64):
+    """Smokes, molotovs, flashes, HEs, the bomb, and the throw arcs."""
+    util = {"smokes": [], "fires": [], "flashes": [], "hes": [], "throws": []}
+    bomb_events = []
+
+    # Nominal durations, used only when the demo never recorded the entity
+    # expiring. CS2 smokes last ~18s; molotov/incendiary burn ~7s.
+    util["smokes"] = timed_utility(to_dicts(getattr(dem, "smokes", None)),
+                                   getattr(dem, "smoke_duration", 18),
+                                   round_rows, tickrate)
+    util["fires"] = timed_utility(to_dicts(getattr(dem, "infernos", None)),
+                                  7, round_rows, tickrate)
+
+    # Flash and HE detonations live in the raw event tables rather than a named
+    # property, and those tables carry no round number - hence round_of().
+    events = getattr(dem, "events", {}) or {}
+    for key, out_key in (("flashbang_detonate", "flashes"),
+                         ("hegrenade_detonate", "hes")):
+        df = events.get(key)
+        if df is None or df.height == 0:
+            continue
+        cols = set(df.columns)
+        xk = "x" if "x" in cols else ("X" if "X" in cols else None)
+        yk = "y" if "y" in cols else ("Y" if "Y" in cols else None)
+        if not xk or not yk:
+            continue
+        for r in to_dicts(df):
+            if r.get(xk) is None or r.get(yk) is None:
+                continue
+            ev = {"t": int(r["tick"]), "x": round(float(r[xk]), 1),
+                  "y": round(float(r[yk]), 1),
+                  "r": r.get("round_num") or round_of(r.get("tick"), round_rows)}
+            if "user_name" in cols:
+                ev["by"] = r.get("user_name")
+            if "user_side" in cols:
+                ev["side"] = r.get("user_side")
+            util[out_key].append(ev)
+
+    # ---- bomb ----
+    bdf = getattr(dem, "bomb", None)
+    if bdf is not None and bdf.height:
+        for r in to_dicts(bdf):
+            # pickup/drop happen constantly and tell a reviewer nothing
+            if r.get("event") not in ("plant", "defuse", "detonate"):
+                continue
+            if r.get("X") is None:
+                continue
+            bomb_events.append({
+                "t": int(r["tick"]), "event": r["event"],
+                "x": round(float(r["X"]), 1), "y": round(float(r["Y"]), 1),
+                "r": r.get("round_num"), "site": r.get("bombsite"),
+                "by": r.get("name"),
+            })
+
+    # ---- throw arcs ----
+    gdf = getattr(dem, "grenades", None)
+    if gdf is not None and gdf.height:
+        have = set(gdf.columns)
+        if {"entity_id", "tick", "X", "Y", "grenade_type"} <= have:
+            flown = gdf.filter(pl.col("X").is_not_null())
+            group_cols = ["entity_id"] + (["round_num"] if "round_num" in have else [])
+            for _, sub in flown.group_by(group_cols):
+                rows = sub.sort("tick").to_dicts()
+                kind = GRENADE_KINDS.get(rows[0].get("grenade_type"))
+                if kind is None:
+                    continue
+                # trim to the airborne part - see AT_REST_UNITS
+                flight = [rows[0]]
+                for p in rows[1:]:
+                    prev = flight[-1]
+                    moved = math.dist(
+                        (p["X"], p["Y"], p.get("Z") or 0.0),
+                        (prev["X"], prev["Y"], prev.get("Z") or 0.0))
+                    if moved < AT_REST_UNITS:
+                        break
+                    flight.append(p)
+                if len(flight) < 2:
+                    continue
+                pts = [p for i, p in enumerate(flight)
+                       if i % THROW_EVERY_TICKS == 0]
+                if pts[-1] is not flight[-1]:
+                    pts.append(flight[-1])
+                rnd = rows[0].get("round_num")
+                thrower = rows[0].get("thrower")
+                util["throws"].append({
+                    "kind": kind,
+                    "s": int(flight[0]["tick"]),
+                    "e": int(flight[-1]["tick"]),
+                    "r": rnd,
+                    "by": thrower,
+                    "side": (side_by_round.get(rnd) or {}).get(thrower),
+                    "p": [[round(float(p["X"]), 1), round(float(p["Y"]), 1)] for p in pts],
+                })
+            util["throws"].sort(key=lambda t: t["s"])
+
+    counts = ", ".join(f"{k} {len(v)}" for k, v in util.items() if v)
+    print(f"[*] Utility: {counts or 'none found'}, bomb events {len(bomb_events)}")
+    return util, bomb_events
 
 
 # --------------------------------------------------------------------------
@@ -249,6 +434,20 @@ def parse(demo_path: Path, pov_name: str | None):
     # ---- rounds ----
     round_rows = to_dicts(rounds_df)
 
+    # name -> side, per round. Sides swap at half time, so a single global map
+    # would mislabel half the match. Built from the frames we already have
+    # rather than re-scanning the tick table.
+    side_by_round = {}
+    for fr in frame_list:
+        rnd = fr.get("round")
+        if rnd is None or rnd in side_by_round:
+            continue
+        side_by_round[rnd] = {p["n"]: p.get("t") for p in fr["players"] if p.get("t")}
+
+    # ---- utility ----
+    utility, bomb_events = parse_utility(
+        dem, round_rows, side_by_round, header.get("tickrate") or 64)
+
     # ---- kills (for viewer event markers + stats) ----
     kill_events = []
     kcols = {
@@ -377,6 +576,8 @@ def parse(demo_path: Path, pov_name: str | None):
         # is the derived label position for each callout the viewer can draw.
         "place_names": place_names,
         "places": places,
+        "utility": utility,
+        "bomb": bomb_events,
         "stats": stats,
         "pov": pov_name,
     }

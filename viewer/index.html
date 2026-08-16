@@ -159,7 +159,8 @@
       <span>POV <b id="m-pov">—</b></span>
       <span>AT <b id="m-place">—</b></span>
     </div>
-    <button class="loadbtn" id="toggle-callouts" style="margin-left:auto" title="Toggle map callout labels">CALLOUTS ON</button>
+    <button class="loadbtn" id="toggle-callouts" style="margin-left:auto" title="Toggle map callout labels (C)">CALLOUTS ON</button>
+    <button class="loadbtn" id="toggle-utility" style="margin-left:8px" title="Toggle smokes, molotovs, flashes, HEs and throw arcs (U)">UTILITY ON</button>
     <label class="loadbtn" style="margin-left:8px">LOAD MATCH JSON<input type="file" id="file" accept=".json"></label>
   </header>
 
@@ -227,6 +228,9 @@ let killMarks=[];         // {x,y,born} on overlay - ages in milliseconds, not f
 let PLACES = {};          // callout name -> {x,y,n} label anchor, from the parser
 let PLACE_NAMES = [];     // index -> callout name, for the per-entry `pl` field
 let showCallouts = true;
+let showUtility = true;
+let UTIL = {smokes:[],fires:[],flashes:[],hes:[],throws:[]};
+let BOMB = [];
 // Two separate layers, and the split matters:
 //   ANALYSIS is arithmetic from analyze.py - always true, always available.
 //   COACH is the model's reading of it - optional, and absent without an API key.
@@ -289,6 +293,9 @@ async function loadMatch(data){
   // as an error.
   PLACES = data.places || {};
   PLACE_NAMES = data.place_names || [];
+  UTIL = Object.assign({smokes:[],fires:[],flashes:[],hes:[],throws:[]},
+                       data.utility||{});
+  BOMB = data.bomb || [];
 
   // Sidecars, both optional. Cleared first so switching matches can't leave
   // the previous match's coaching on screen.
@@ -469,6 +476,121 @@ function drawCallouts(){
   rctx.restore();
 }
 
+// ---- utility ----
+// Radii are world units. CS2 smokes cover roughly 144u; a molotov pool is a
+// bit tighter. These are rendering choices, not demo facts, so they live here
+// rather than in the parser output.
+const SMOKE_RADIUS = 144;
+const FIRE_RADIUS  = 120;
+const POP_SECONDS  = 1.5;   // how long a flash/HE burst stays on screen
+const THROW_TRAIL  = 2.0;   // seconds a throw arc lingers after it lands
+
+// Like the killfeed, everything here is a PURE FUNCTION of curTick - an item is
+// drawn if the tick falls inside its own window. Nothing is queued and nothing
+// is remembered, so scrubbing backwards and jumping rounds stay correct.
+function drawUtility(curTick){
+  if(!showUtility || !worldToPx || curTick==null) return;
+  const rate=(M&&M.tickrate)||64;
+
+  // throw arcs first, so live smoke sits on top of its own trajectory
+  for(const t of UTIL.throws||[]){
+    if(curTick < t.s || curTick > t.e + THROW_TRAIL*rate) continue;
+    const pts=t.p; if(!pts||pts.length<2) continue;
+    // draw only as far as the grenade has actually flown
+    const frac=Math.max(0,Math.min(1,(curTick-t.s)/Math.max(1,t.e-t.s)));
+    const upto=Math.max(2,Math.ceil(frac*pts.length));
+    const fade=curTick>t.e ? 1-(curTick-t.e)/(THROW_TRAIL*rate) : 1;
+    octx.save();
+    octx.globalAlpha=Math.max(0,fade)*0.75;
+    octx.strokeStyle=utilColour(t.kind,t.side);
+    octx.lineWidth=1.5; octx.setLineDash([4,3]);
+    octx.beginPath();
+    for(let i=0;i<upto;i++){
+      const p=worldToPx(pts[i][0],pts[i][1]);
+      i?octx.lineTo(p.x,p.y):octx.moveTo(p.x,p.y);
+    }
+    octx.stroke();
+    octx.restore();
+  }
+
+  // active smokes
+  for(const s of UTIL.smokes||[]){
+    if(curTick<s.s || curTick>s.e) continue;
+    const p=worldToPx(s.x,s.y);
+    const rpx=SMOKE_RADIUS*pxPerUnit();
+    // fade the last second so it doesn't vanish mid-frame
+    const left=(s.e-curTick)/rate;
+    octx.save();
+    octx.globalAlpha=left<1?Math.max(0.1,left):1;
+    octx.fillStyle="rgba(214,222,234,.34)";
+    octx.strokeStyle="rgba(232,237,244,.55)";
+    octx.lineWidth=1.5;
+    octx.beginPath(); octx.arc(p.x,p.y,rpx,0,7); octx.fill(); octx.stroke();
+    octx.restore();
+  }
+
+  // active fires
+  for(const f of UTIL.fires||[]){
+    if(curTick<f.s || curTick>f.e) continue;
+    const p=worldToPx(f.x,f.y);
+    const rpx=FIRE_RADIUS*pxPerUnit();
+    const g=octx.createRadialGradient(p.x,p.y,rpx*0.2,p.x,p.y,rpx);
+    g.addColorStop(0,"rgba(255,148,46,.55)");
+    g.addColorStop(1,"rgba(255,86,20,.12)");
+    octx.save();
+    octx.fillStyle=g;
+    octx.beginPath(); octx.arc(p.x,p.y,rpx,0,7); octx.fill();
+    octx.strokeStyle="rgba(255,132,40,.7)"; octx.lineWidth=1.5; octx.stroke();
+    octx.restore();
+  }
+
+  // flash + HE pops: brief, expanding, then gone
+  const pops=[["flashes","rgba(255,255,255,",30],["hes","rgba(255,120,90,",26]];
+  for(const [key,rgb,maxR] of pops){
+    for(const e of UTIL[key]||[]){
+      const age=(curTick-e.t)/(POP_SECONDS*rate);
+      if(age<0||age>1) continue;
+      const p=worldToPx(e.x,e.y);
+      octx.save();
+      octx.strokeStyle=rgb+(1-age)+")"; octx.lineWidth=2;
+      octx.beginPath(); octx.arc(p.x,p.y,6+age*maxR,0,7); octx.stroke();
+      if(key==="flashes"){
+        octx.fillStyle="rgba(255,255,255,"+(0.35*(1-age))+")";
+        octx.beginPath(); octx.arc(p.x,p.y,6+age*maxR,0,7); octx.fill();
+      }
+      octx.restore();
+    }
+  }
+
+  // planted bomb stays put until it goes off or is defused
+  for(const b of BOMB||[]){
+    if(b.event!=="plant") continue;
+    const done=(BOMB.find(x=>x.r===b.r&&(x.event==="defuse"||x.event==="detonate"))||{}).t;
+    if(curTick<b.t || (done!=null && curTick>done)) continue;
+    const p=worldToPx(b.x,b.y);
+    const blink=0.55+0.45*Math.sin(curTick/rate*6);
+    octx.save();
+    octx.fillStyle="rgba(255,93,93,"+blink.toFixed(2)+")";
+    octx.beginPath();
+    octx.moveTo(p.x,p.y-7); octx.lineTo(p.x+7,p.y); octx.lineTo(p.x,p.y+7);
+    octx.lineTo(p.x-7,p.y); octx.closePath(); octx.fill();
+    octx.restore();
+  }
+}
+
+// world units -> canvas pixels, from the same calibration the transform uses
+function pxPerUnit(){
+  const c=CAL[M&&M.map]; if(!c) return 0.2;
+  return radar.width/(c.scale*1024);
+}
+function utilColour(kind,side){
+  if(kind==="smoke") return "rgba(214,222,234,.9)";
+  if(kind==="fire")  return "rgba(255,132,40,.9)";
+  if(kind==="flash") return "rgba(255,255,255,.9)";
+  if(kind==="he")    return "rgba(255,120,90,.9)";
+  return side==="t"?getCSS('--t'):getCSS('--ct');
+}
+
 // ---- draw ----
 function draw(){
   rctx.clearRect(0,0,radar.width,radar.height);
@@ -489,6 +611,13 @@ function draw(){
   // index the next frame by player so we can pair samples up
   const next = {};
   if(nx) (nx.players||[]).forEach(p=>{ next[p.n]=p; });
+
+  // Utility is drawn BEFORE players so smoke never hides a player dot - you
+  // want to see who's standing in it. Needs curTick, which the kill-marker
+  // block below also computes, so hoist it here.
+  const utilTick = (nx && fr.tick!=null && nx.tick!=null)
+    ? lerp(fr.tick,nx.tick,frac) : fr.tick;
+  drawUtility(utilTick);
 
   // kill flashes - aged in real milliseconds so they last the same wall-clock
   // time whether we're drawing at 2fps or 144fps
@@ -566,7 +695,7 @@ function draw(){
 
   // Fire kills by crossing their game tick, not by proximity to a sample. The
   // old window test could fire twice or miss entirely depending on frame rate.
-  const curTick = (nx && fr.tick!=null && nx.tick!=null) ? lerp(fr.tick,nx.tick,frac) : fr.tick;
+  const curTick = utilTick;
   if(curTick!=null){
     (M.kills||[]).forEach(k=>{
       if(k.tick==null || k.vx==null) return;
@@ -893,7 +1022,15 @@ function toggleCallouts(){
   b.classList.toggle("off",!showCallouts);
   dirty=true; draw();
 }
+function toggleUtility(){
+  showUtility=!showUtility;
+  const b=$("#toggle-utility");
+  b.textContent = showUtility?"UTILITY ON":"UTILITY OFF";
+  b.classList.toggle("off",!showUtility);
+  dirty=true; draw();
+}
 $("#toggle-callouts").onclick=toggleCallouts;
+$("#toggle-utility").onclick=toggleUtility;
 document.addEventListener("keydown",e=>{
   if(e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA") return;
   if(e.code==="Space"){e.preventDefault();$("#play").click();}
@@ -901,6 +1038,7 @@ document.addEventListener("keydown",e=>{
   if(e.code==="ArrowRight"){e.preventDefault();seekTo(Math.floor(pos)+1);}
   if(e.code==="ArrowLeft"){e.preventDefault();seekTo(Math.ceil(pos)-1);}
   if(e.code==="KeyC"){e.preventDefault();toggleCallouts();}
+  if(e.code==="KeyU"){e.preventDefault();toggleUtility();}
 });
 $("#file").onchange=e=>{
   const f=e.target.files[0]; if(!f)return;
