@@ -45,6 +45,21 @@
 
   /* right rail */
   aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;padding:16px}
+  /* voice */
+  .vsum{color:var(--ink-faint);letter-spacing:0;text-transform:none;font-weight:400}
+  .vrow{display:grid;grid-template-columns:8px 1fr auto;gap:8px;align-items:center;
+        padding:5px 10px;cursor:pointer;border-left:2px solid transparent}
+  .vrow:hover{background:var(--panel-2)}
+  .vrow .vdot{width:8px;height:8px;border-radius:50%;background:var(--ink-faint);
+              transition:background .12s,box-shadow .12s}
+  /* a talking player lights up; this is the only moving part of the panel */
+  .vrow.talking{border-left-color:var(--accent)}
+  .vrow.talking .vdot{background:var(--accent);box-shadow:0 0 7px var(--accent)}
+  .vrow.talking .nm{color:var(--ink)}
+  .vrow.muted{opacity:.4}
+  .vrow.muted .nm{text-decoration:line-through}
+  .vhint{font-family:var(--mono);font-size:10px;color:var(--ink-faint);
+         padding:2px 10px 8px}
   .rail-h{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;
     color:var(--ink-faint);margin:2px 0 10px;padding-bottom:8px;border-bottom:1px solid var(--line)}
   .roster{display:flex;flex-direction:column;gap:3px;margin-bottom:22px}
@@ -161,6 +176,7 @@
     </div>
     <button class="loadbtn" id="toggle-callouts" style="margin-left:auto" title="Toggle map callout labels (C)">CALLOUTS ON</button>
     <button class="loadbtn" id="toggle-utility" style="margin-left:8px" title="Toggle smokes, molotovs, flashes, HEs and throw arcs (U)">UTILITY ON</button>
+    <button class="loadbtn off" id="toggle-voice" style="margin-left:8px" title="Play the team's voice comms in sync (V)">VOICE OFF</button>
     <label class="loadbtn" style="margin-left:8px">LOAD MATCH JSON<input type="file" id="file" accept=".json"></label>
   </header>
 
@@ -184,6 +200,12 @@
     </form>
     <div id="answer"></div>
     <div id="coach"></div>
+    <div id="voice-wrap" style="display:none">
+      <div class="rail-h">Voice <span id="voice-sum" class="vsum"></span></div>
+      <div id="voice-list"></div>
+      <div class="vhint">click a name to mute</div>
+    </div>
+
     <div class="rail-h">Roster</div>
     <div class="roster" id="roster"></div>
     <div class="rail-h">Selected player</div>
@@ -229,6 +251,11 @@ let PLACES = {};          // callout name -> {x,y,n} label anchor, from the pars
 let PLACE_NAMES = [];     // index -> callout name, for the per-entry `pl` field
 let showCallouts = true;
 let showUtility = true;
+let VOICE = null;          // the _voice.json index, if one exists
+let voiceOn = false;       // off until the user asks - audio should never surprise
+let voiceMuted = {};       // name -> true, per-player mute
+let voiceEls = {};         // name -> HTMLAudioElement
+let speakingNow = [];      // names talking at the current tick, for the UI
 let UTIL = {smokes:[],fires:[],flashes:[],hes:[],throws:[]};
 let BOMB = [];
 // Two separate layers, and the split matters:
@@ -312,14 +339,16 @@ async function loadMatch(data){
   selectPlayer(data.pov || (data.players?.[0]&&data.players[0].name));
 }
 
-// data/<name>_analysis.json and data/<name>_coach.json. Both are optional and a
-// missing one is the normal case, not an error - the analysis needs a separate
-// command, and the coaching needs an API key on top of that.
+// data/<name>_analysis.json, _coach.json and _voice.json. All three are
+// optional and a missing one is the normal case, not an error - the analysis
+// needs a separate command, the coaching needs an API key on top of that, and
+// the voice needs its own extraction pass.
 function loadSidecars(name){
   fetch(`../data/${name}_analysis.json`).then(r=>r.ok?r.json():null).catch(()=>null)
     .then(a=>{ if(a){ ANALYSIS=a; coachKey=null; buildRounds(); dirty=true; draw(); }});
   fetch(`../data/${name}_coach.json`).then(r=>r.ok?r.json():null).catch(()=>null)
     .then(c=>{ if(c){ COACH=c; coachKey=null; buildRounds(); dirty=true; draw(); }});
+  loadVoice(name);
 }
 
 function firstRound(){
@@ -591,6 +620,123 @@ function drawUtility(curTick){
   }
 }
 
+// ---- voice UI ----
+function buildVoicePanel(){
+  const wrap=$("#voice-wrap");
+  if(!VOICE || !VOICE.players.length){ wrap.style.display="none"; return; }
+  wrap.style.display="";
+  const total=VOICE.players.reduce((s,p)=>s+p.seconds,0);
+  $("#voice-sum").textContent=`${VOICE.players.length} players · ${Math.round(total/60)} min`;
+  $("#voice-list").innerHTML = VOICE.players.map(p=>`
+    <div class="vrow${voiceMuted[p.name]?" muted":""}" data-name="${esc(p.name)}">
+      <span class="vdot"></span>
+      <span class="nm">${esc(p.name)}</span>
+      <span class="kd">${Math.round(p.seconds)}s</span>
+    </div>`).join("");
+  wrap.querySelectorAll(".vrow").forEach(row=>{
+    row.onclick=()=>{
+      const n=row.dataset.name;
+      voiceMuted[n]=!voiceMuted[n];
+      row.classList.toggle("muted",!!voiceMuted[n]);
+      if(voiceMuted[n] && voiceEls[n]) voiceEls[n].pause();
+    };
+  });
+}
+
+function renderSpeaking(){
+  const wrap=$("#voice-wrap");
+  if(!wrap) return;
+  wrap.querySelectorAll(".vrow").forEach(row=>{
+    row.classList.toggle("talking", speakingNow.includes(row.dataset.name));
+  });
+}
+
+function toggleVoice(){
+  if(!VOICE){ return; }
+  voiceOn=!voiceOn;
+  const b=$("#toggle-voice");
+  b.textContent=voiceOn?"VOICE ON":"VOICE OFF";
+  b.classList.toggle("off",!voiceOn);
+  if(voiceOn){
+    // preload was "none" so the first play would stall; warm them up now
+    for(const el of Object.values(voiceEls)) el.preload="auto";
+  }else{
+    stopAllVoice();
+  }
+  dirty=true; draw();
+}
+
+// ---- voice comms ----
+// A player's track is their speech with every silence removed, so it does not
+// share a clock with the demo. The index maps each utterance to its offset in
+// that file; playback is: find the utterance covering this tick, seek there,
+// play. Every voice packet is exactly 10ms, so inside an utterance the mapping
+// is linear and exact - no drift over a 36 minute match.
+function utteranceAt(player, tick){
+  const u=player.utterances;
+  let lo=0, hi=u.length-1;
+  while(lo<=hi){                       // they're sorted; binary search
+    const mid=(lo+hi)>>1;
+    if(tick < u[mid].s) hi=mid-1;
+    else if(tick > u[mid].e) lo=mid+1;
+    else return u[mid];
+  }
+  return null;
+}
+
+function loadVoice(name){
+  return fetch(`../data/${name}_voice.json`)
+    .then(r => r.ok ? r.json() : null)
+    .then(j => {
+      VOICE = j;
+      if(!j) return;
+      for(const p of j.players){
+        const a=new Audio(`../data/${j.dir}/${p.file}`);
+        a.preload="none";                // 8MB total; don't fetch until asked
+        voiceEls[p.name]=a;
+      }
+      buildVoicePanel();
+    })
+    .catch(()=>{ VOICE=null; });
+}
+
+// Pure function of curTick, like everything else that follows the playhead.
+// Called from draw(), so scrubbing and round jumps re-sync for free.
+function syncVoice(curTick){
+  if(!VOICE) return;
+  const live=[];
+  for(const p of VOICE.players){
+    const el=voiceEls[p.name];
+    if(!el) continue;
+    const u=(voiceOn && curTick!=null) ? utteranceAt(p, curTick) : null;
+    const wanted = u && !voiceMuted[p.name] && playing;
+    if(u) live.push(p.name);
+
+    if(!wanted){
+      if(!el.paused) el.pause();
+      continue;
+    }
+    // where in the file this tick lands
+    const target = u.a + (curTick - u.s)/VOICE.tickrate;
+    // Only correct when we have actually drifted. Assigning currentTime every
+    // frame restarts the decoder and produces a stutter you can hear.
+    if(Math.abs(el.currentTime - target) > 0.25){
+      try{ el.currentTime = Math.max(0, target); }catch(e){}
+    }
+    el.playbackRate = Math.min(4, Math.max(0.25, speed));
+    if(el.paused) el.play().catch(()=>{});
+  }
+  if(live.join()!==speakingNow.join()){
+    speakingNow=live;
+    renderSpeaking();
+  }
+}
+
+function stopAllVoice(){
+  for(const el of Object.values(voiceEls)) if(!el.paused) el.pause();
+  if(speakingNow.length){ speakingNow=[]; renderSpeaking(); }
+}
+
 // ---- grenade icons ----
 // Valve's own artwork, the same set the killfeed uses. They're pure white, so
 // on a pale radar area a bare icon disappears - each one gets a dark disc
@@ -773,6 +919,7 @@ function draw(){
     lastTick = curTick;
   }
   drawKillfeed(curTick);
+  syncVoice(curTick);
   drawCoach(curTick);
 }
 
@@ -1073,6 +1220,10 @@ requestAnimationFrame(tick);
 
 function seekTo(p){
   pos=Math.max(0,Math.min(frames.length?frames.length-1:0,p));
+  // Jumping the playhead invalidates whatever the audio was mid-way through;
+  // syncVoice re-seeks on the next draw. Without this you hear the old
+  // utterance keep running over the new position.
+  stopAllVoice();
   resetKillCursor(); dirty=true;
 }
 
@@ -1080,6 +1231,9 @@ function seekTo(p){
 $("#play").onclick=()=>{
   if(pos>=frames.length-1) seekTo(0);
   playing=!playing; $("#play").textContent=playing?"❚❚":"▶";
+  // Voice only makes sense while time is moving: paused on a single frame it
+  // would either loop a 10ms slice or run away from the playhead.
+  if(!playing) stopAllVoice();
   dirty=true;
 };
 $("#seek").oninput=e=>seekTo(+e.target.value);
@@ -1100,6 +1254,7 @@ function toggleUtility(){
 }
 $("#toggle-callouts").onclick=toggleCallouts;
 $("#toggle-utility").onclick=toggleUtility;
+$("#toggle-voice").onclick=toggleVoice;
 document.addEventListener("keydown",e=>{
   if(e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA") return;
   if(e.code==="Space"){e.preventDefault();$("#play").click();}
@@ -1108,6 +1263,7 @@ document.addEventListener("keydown",e=>{
   if(e.code==="ArrowLeft"){e.preventDefault();seekTo(Math.ceil(pos)-1);}
   if(e.code==="KeyC"){e.preventDefault();toggleCallouts();}
   if(e.code==="KeyU"){e.preventDefault();toggleUtility();}
+  if(e.code==="KeyV"){e.preventDefault();toggleVoice();}
 });
 $("#file").onchange=e=>{
   const f=e.target.files[0]; if(!f)return;

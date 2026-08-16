@@ -63,11 +63,32 @@ what happened; a round you survived says so.
 | `←` `→` | step one sample (~0.5s) |
 | `C` | callout labels on/off |
 | `U` | utility on/off |
+| `V` | voice comms on/off |
 
 **Utility** draws smokes and molotovs as areas for exactly as long as they were
 actually up, flashes and HEs as brief pops where they went off, the flight path
 of every grenade thrown, and a planted bomb pulsing until it's defused or
 explodes. It's drawn under the players, so smoke never hides a dot.
+
+## Voice comms
+
+FACEIT demos record in-game voice. One extra pass pulls it out:
+
+```
+python parser/voice.py 2v5.dem
+```
+
+Then press `V` in the viewer and the comms play in sync with the playhead —
+scrub anywhere and you hear what was being said at that moment. The Voice panel
+lists who talked and for how long; whoever is speaking lights up, and clicking
+a name mutes them.
+
+Only in-game voice is captured. If the team was on Discord there'll be nothing
+to extract, and the script says so rather than writing empty files.
+
+Note this produces audio of identifiable people talking. It's written next to
+the demo, it's gitignored, and nothing uploads it anywhere — but it is a
+recording of your teammates, so treat it accordingly.
 
 > Serve it rather than opening the file directly — browsers block `fetch()` of
 > the radar and calibration from `file://`. `run_viewer.bat` does all of this.

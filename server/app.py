@@ -132,12 +132,77 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _serve_range(self):
+        """
+        Byte-range support, so the browser can seek inside a voice track.
+
+        SimpleHTTPRequestHandler answers every request with the whole file and
+        no Accept-Ranges header. An <audio> element treats that as a stream of
+        unknown length: duration reads back NaN and seeking to a point that
+        isn't buffered yet silently does nothing. Voice playback is entirely
+        seeking - every utterance jump is a seek - so it needs real 206s.
+
+        Returns True if it handled the request.
+        """
+        rng = self.headers.get("Range")
+        if not rng or not rng.startswith("bytes="):
+            return False
+        path = self.translate_path(self.path)
+        if not os.path.isfile(path):
+            return False
+        size = os.path.getsize(path)
+        spec = rng[6:].split(",")[0].strip()
+        try:
+            first, _, last = spec.partition("-")
+            if first:
+                start = int(first)
+                end = int(last) if last else size - 1
+            else:
+                # suffix form: "bytes=-500" means the final 500 bytes
+                start, end = max(0, size - int(last)), size - 1
+        except ValueError:
+            return False
+        if start >= size or start > end:
+            self.send_response(416)
+            self.send_header("Content-Range", f"bytes */{size}")
+            self.end_headers()
+            return True
+        end = min(end, size - 1)
+        self.send_response(206)
+        self.send_header("Content-Type", self.guess_type(path))
+        self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.send_header("Content-Length", str(end - start + 1))
+        self.send_header("Accept-Ranges", "bytes")
+        self.end_headers()
+        with open(path, "rb") as f:
+            f.seek(start)
+            remaining = end - start + 1
+            while remaining > 0:
+                chunk = f.read(min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
+        return True
+
+    def end_headers(self):
+        # Advertise range support on ordinary 200s too, so the browser knows it
+        # may seek without having to probe first.
+        if self.path.startswith("/data/voice/"):
+            self.send_header("Accept-Ranges", "bytes")
+        super().end_headers()
+
     def do_GET(self):
         if self.path == "/api/status":
             # Lets the viewer hide the ask box rather than offer a button that
             # can only fail.
             return self._json(200, {"llm": bool(os.environ.get("ANTHROPIC_API_KEY")),
                                     "model": MODEL})
+        try:
+            if self._serve_range():
+                return
+        except (BrokenPipeError, ConnectionResetError):
+            return          # the browser closed the stream mid-seek; normal
         return super().do_GET()
 
     def do_POST(self):

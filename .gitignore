@@ -8,5 +8,9 @@ viewer/icons/
 # parser output + caches
 data/*.json
 !data/_sample_mirage.json
+
+# Extracted voice comms. These are recordings of identifiable people talking -
+# they belong to the match, not to the repo, and must never be committed.
+data/voice/
 __pycache__/
 .pytest_cache/
