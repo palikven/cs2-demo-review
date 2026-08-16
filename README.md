@@ -70,6 +70,12 @@ actually up, flashes and HEs as brief pops where they went off, the flight path
 of every grenade thrown, and a planted bomb pulsing until it's defused or
 explodes. It's drawn under the players, so smoke never hides a dot.
 
+**Teams** splits the two sides and shows each player's live state at the
+playhead: HP bar (green → amber → red), current callout, and what they're
+holding — primary, pistol, every grenade, the bomb, a defuse kit. Each side's
+header totals alive count and remaining HP, which is the number that actually
+decides a retake.
+
 ## Voice comms
 
 FACEIT demos record in-game voice. One extra pass pulls it out:

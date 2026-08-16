@@ -45,6 +45,28 @@
 
   /* right rail */
   aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;padding:16px}
+  /* team panels */
+  .tm-h{display:flex;justify-content:space-between;align-items:baseline;
+        padding:8px 10px 4px;font-family:var(--mono);font-size:10px;
+        letter-spacing:.12em;text-transform:uppercase;border-top:1px solid var(--line)}
+  .tm-h.t .tm-name{color:var(--t)} .tm-h.ct .tm-name{color:var(--ct)}
+  .tm-alive{color:var(--ink-faint);letter-spacing:0;text-transform:none}
+  .prow.gear{grid-template-columns:8px minmax(0,1fr) 26px 34px auto;gap:6px;
+             padding:4px 10px;align-items:center}
+  .prow.gear .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hpn{font-family:var(--mono);font-size:10px;color:var(--ink-dim);text-align:right}
+  .hpbar{display:block;height:4px;background:var(--line);border-radius:2px;overflow:hidden}
+  .hpbar i{display:block;height:100%;background:var(--accent);transition:width .1s linear}
+  .hpbar i.warn{background:var(--t)} .hpbar i.low{background:var(--danger)}
+  .gear-icons{display:flex;align-items:center;gap:2px;justify-content:flex-end;min-height:14px}
+  /* Valve's icons are white; dim them so they read as equipment rather than
+     competing with the player names */
+  .gi{height:11px;width:auto;opacity:.78;flex:none}
+  .gi-gun{height:13px} .gi-pistol{height:10px;opacity:.6}
+  .gi-nade{height:11px} .gi-c4{height:12px;opacity:.95}
+  .gi-kit{font-size:11px;color:var(--ct);opacity:.9;line-height:1}
+  .prow.gear.dead .gear-icons{opacity:.25}
+
   /* voice */
   .vsum{color:var(--ink-faint);letter-spacing:0;text-transform:none;font-weight:400}
   .vrow{display:grid;grid-template-columns:8px 1fr auto;gap:8px;align-items:center;
@@ -206,8 +228,8 @@
       <div class="vhint">click a name to mute</div>
     </div>
 
-    <div class="rail-h">Roster</div>
-    <div class="roster" id="roster"></div>
+    <div class="rail-h">Teams</div>
+    <div id="teams"></div>
     <div class="rail-h">Selected player</div>
     <div class="statgrid" id="statgrid"></div>
     <div class="legend" style="margin-top:18px">
@@ -430,23 +452,14 @@ function selectRound(r){
 }
 
 // ---- roster + stats ----
-function buildRoster(){
-  const el=$("#roster"); el.innerHTML="";
-  (M.players||[]).forEach(p=>{
-    const st=(M.stats&&M.stats.per_player&&M.stats.per_player[p.name])||{};
-    const row=document.createElement("div");
-    row.className="prow"+(p.name===M.pov?" pov":"");
-    row.dataset.name=p.name;
-    row.innerHTML=`<span class="dot" data-dot></span>
-      <span class="nmwrap"><span class="nm">${esc(p.name)}</span><span class="pl" data-pl></span></span>
-      <span class="kd">${st.kills??0}–${st.deaths??0}</span>`;
-    row.onclick=()=>selectPlayer(p.name);
-    el.appendChild(row);
-  });
-}
+// The team panels are built from the current frame, since side membership
+// only exists per tick and swaps at half time. buildTeams() no-ops until the
+// roster actually changes, so calling it on load is enough to seed it.
+function buildRoster(){ teamsKey=""; }
+
 function selectPlayer(name){
   selected=name; dirty=true;
-  document.querySelectorAll(".prow").forEach(r=>r.style.background=r.dataset.name===name?"var(--line)":"var(--panel-2)");
+  document.querySelectorAll(".prow").forEach(r=>r.classList.toggle("pov",r.dataset.name===name));
   const st=(M.stats&&M.stats.per_player&&M.stats.per_player[name])||{};
   const cells=[
     ["v",`${st.kills??0}/${st.deaths??0}/${st.assists??0}`,"K / D / A"],
@@ -618,6 +631,153 @@ function drawUtility(curTick){
     octx.lineTo(p.x-7,p.y); octx.closePath(); octx.fill();
     octx.restore();
   }
+}
+
+// ---- team panels ----
+// Rebuilt only when the roster or the side split changes (i.e. at half time);
+// everything that moves per frame - HP, alive state, equipment - is written
+// straight onto the cached elements. Re-rendering ten rows of innerHTML at
+// 144Hz is exactly the churn the killfeed was restructured to avoid.
+let teamRows = {};      // name -> {row,barEl,hpEl,gearEl,gearKey,dotEl}
+let teamsKey = "";
+
+function buildTeams(fr){
+  const sides={t:[],ct:[]};
+  for(const p of (fr&&fr.players)||[]) if(p.t==="t"||p.t==="ct") sides[p.t].push(p.n);
+  for(const k of ["t","ct"]) sides[k].sort();
+  const key=`t:${sides.t.join(",")}|ct:${sides.ct.join(",")}`;
+  if(key===teamsKey) return false;
+  teamsKey=key; teamRows={};
+
+  const block=(side)=>`
+    <div class="tm-h ${side}">
+      <span class="tm-name">${side.toUpperCase()}</span>
+      <span class="tm-alive" id="alive-${side}"></span>
+    </div>
+    ${sides[side].map(n=>`
+      <div class="prow gear" data-name="${esc(n)}">
+        <span class="dot ${side}"></span>
+        <span class="nmwrap">
+          <span class="nm">${esc(n)}</span>
+          <span class="pl" data-pl></span>
+        </span>
+        <span class="hpn">100</span>
+        <span class="hpbar"><i></i></span>
+        <span class="gear-icons"></span>
+      </div>`).join("")}`;
+
+  $("#teams").innerHTML = block("t") + block("ct");
+  $("#teams").querySelectorAll(".prow.gear").forEach(row=>{
+    const n=row.dataset.name;
+    teamRows[n]={row, dotEl:row.querySelector(".dot"),
+                 hpEl:row.querySelector(".hpn"),
+                 barEl:row.querySelector(".hpbar i"),
+                 plEl:row.querySelector("[data-pl]"),
+                 gearEl:row.querySelector(".gear-icons"), gearKey:null};
+    row.onclick=()=>selectPlayer(n);
+  });
+  return true;
+}
+
+function updateTeams(fr){
+  if(!fr) return;
+  buildTeams(fr);
+  const alive={t:0,ct:0}, hpsum={t:0,ct:0};
+  for(const p of fr.players||[]){
+    const R=teamRows[p.n];
+    if(!R) continue;
+    const hp=Math.max(0, p.hp==null?100:p.hp);
+    const dead=hp<=0;
+    if(p.t==="t"||p.t==="ct"){ if(!dead) alive[p.t]++; hpsum[p.t]+=hp; }
+
+    if(R.hpEl.textContent!==String(hp)) R.hpEl.textContent=hp;
+    R.barEl.style.width=hp+"%";
+    // green -> amber -> red, so a hurt player reads at a glance
+    R.barEl.className = hp>60?"":(hp>25?"warn":"low");
+    R.row.classList.toggle("dead",dead);
+    R.row.classList.toggle("pov",p.n===selected);
+    if(R.plEl){
+      const where=dead?null:placeOf(p);
+      const label=where?calloutLabel(where):"";
+      if(R.plEl.textContent!==label) R.plEl.textContent=label;
+    }
+
+    // equipment only redraws when the loadout actually changes
+    const L=dead?null:loadoutOf(p);
+    const key=dead?"dead":(p.eq==null?"none":p.eq+(p.df?"+d":""));
+    if(key!==R.gearKey){
+      R.gearKey=key;
+      R.gearEl.innerHTML = L ? [
+        L.primary?itemIcon(L.primary,"gi gi-gun"):"",
+        L.pistol?itemIcon(L.pistol,"gi gi-pistol"):"",
+        L.zeus?itemIcon("Zeus x27","gi gi-nade"):"",
+        ...L.nades.map(n=>itemIcon(n,"gi gi-nade")),
+        L.c4?itemIcon("C4 Explosive","gi gi-c4"):"",
+        p.df?'<span class="gi gi-kit" title="Defuse kit">◇</span>':"",
+      ].join("") : "";
+    }
+  }
+  for(const s of ["t","ct"]){
+    const el=$("#alive-"+s);
+    if(el) el.textContent=`${alive[s]} alive · ${hpsum[s]} hp`;
+  }
+}
+
+// ---- loadouts ----
+// `inventory` gives display names, not the internal weapon ids the killfeed
+// uses, so this is a separate map from ICON_FILES. Every item seen in the
+// demo is covered; anything new falls through to no icon rather than a
+// wrong one.
+const ITEM_ICONS = {
+  "AK-47":"ak47", "M4A4":"m4a1", "M4A1-S":"m4a1_silencer", "Galil AR":"galilar",
+  "FAMAS":"famas", "AWP":"awp", "SSG 08":"ssg08", "AUG":"aug", "SG 553":"sg556",
+  "G3SG1":"g3sg1", "SCAR-20":"scar20", "M249":"m249", "Negev":"negev",
+  "MAC-10":"mac10", "MP9":"mp9", "MP7":"mp7", "MP5-SD":"mp5sd", "UMP-45":"ump45",
+  "P90":"p90", "PP-Bizon":"bizon",
+  "Nova":"nova", "XM1014":"xm1014", "MAG-7":"mag7", "Sawed-Off":"sawedoff",
+  "Glock-18":"glock", "USP-S":"usp_silencer", "P2000":"p2000", "P250":"p250",
+  "Five-SeveN":"fiveseven", "Tec-9":"tec9", "CZ75-Auto":"cz75a",
+  "Desert Eagle":"deagle", "R8 Revolver":"revolver", "Dual Berettas":"elite",
+  "Smoke Grenade":"smokegrenade", "Flashbang":"flashbang",
+  "High Explosive Grenade":"hegrenade", "Molotov":"molotov",
+  "Incendiary Grenade":"incgrenade", "Decoy Grenade":"decoy",
+  "C4 Explosive":"c4", "Zeus x27":"taser",
+};
+const NADES = new Set(["Smoke Grenade","Flashbang","High Explosive Grenade",
+                       "Molotov","Incendiary Grenade","Decoy Grenade"]);
+const PISTOLS = new Set(["Glock-18","USP-S","P2000","P250","Five-SeveN","Tec-9",
+                         "CZ75-Auto","Desert Eagle","R8 Revolver","Dual Berettas"]);
+
+// Every player carries a knife, so showing it says nothing. Dropping it also
+// keeps the row narrow enough for the primary + pistol + four nades.
+function isKnife(item){
+  return !ITEM_ICONS[item] && /knife|bayonet|karambit|daggers|talon|stiletto|ursus|nomad|paracord|survival|skeleton|navaja|shadow|falchion|huntsman|bowie|butterfly|gut|flip/i.test(item);
+}
+
+function loadoutOf(p){
+  if(!M || p.eq==null || !M.loadouts) return null;
+  const ids=M.loadouts[p.eq];
+  if(!ids) return null;
+  const items=ids.map(i=>M.item_names[i]).filter(Boolean);
+  const out={primary:null, pistol:null, nades:[], c4:false, zeus:false};
+  for(const it of items){
+    if(isKnife(it)) continue;
+    if(it==="C4 Explosive"){ out.c4=true; continue; }
+    if(it==="Zeus x27"){ out.zeus=true; continue; }
+    if(NADES.has(it)){ out.nades.push(it); continue; }
+    if(PISTOLS.has(it)){ out.pistol=it; continue; }
+    if(ITEM_ICONS[it]) out.primary=it;
+  }
+  // stable order so the icons don't reshuffle as the inventory list changes
+  const rank=["Smoke Grenade","Flashbang","High Explosive Grenade",
+              "Molotov","Incendiary Grenade","Decoy Grenade"];
+  out.nades.sort((a,b)=>rank.indexOf(a)-rank.indexOf(b));
+  return out;
+}
+
+function itemIcon(item, cls){
+  const f=ITEM_ICONS[item];
+  return f?`<img class="${cls}" src="icons/${f}.svg" alt="${esc(item)}" title="${esc(item)}">`:"";
 }
 
 // ---- voice UI ----
@@ -883,20 +1043,8 @@ function draw(){
     }
   });
 
-  // roster alive/dead sync + current callout
-  document.querySelectorAll(".prow").forEach(r=>{
-    const pl=(fr.players||[]).find(x=>x.n===r.dataset.name);
-    const alive=pl&&pl.a!==false&&(pl.hp==null||pl.hp>0);
-    r.classList.toggle("dead",pl&&!alive);
-    const dot=r.querySelector("[data-dot]");
-    if(pl){const isT=(pl.t||"").toUpperCase().startsWith("T");
-      dot.style.background=isT?getCSS('--t'):getCSS('--ct');}
-    const plEl=r.querySelector("[data-pl]");
-    if(plEl){
-      const where = pl ? placeOf(pl) : null;
-      plEl.textContent = where ? calloutLabel(where) : "";
-    }
-  });
+  // team panels: HP, alive state, callout and equipment
+  updateTeams(fr);
 
   // header "AT <callout>" for whoever is selected
   const sel=(fr.players||[]).find(x=>x.n===selected);

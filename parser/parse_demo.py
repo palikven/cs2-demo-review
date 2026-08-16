@@ -50,7 +50,7 @@ DATA_DIR = ROOT / "data"
 # off the frames (a list per player per tick would dwarf the rest of the file)
 # and read it only on kill events.
 EXTRA_PLAYER_PROPS = ["yaw", "pitch", "armor_value", "inventory",
-                      "flash_duration", "is_alive"]
+                      "flash_duration", "is_alive", "has_helmet", "has_defuser"]
 
 # A callout label drawn from fewer samples than this is somebody clipping a
 # corner, not a place anyone played. Drawing it just litters the radar.
@@ -315,6 +315,12 @@ def parse(demo_path: Path, pov_name: str | None):
         # renames it to `place` (parsers/utils.py fix_common_names). We used to
         # select it into `keep` and then never write it out.
         "place": first_present(ticks_df, ["place", "last_place_name"]),
+        # Loadout. awpy renames armor_value -> armor in fix_common_names.
+        # `inventory` is a list of display names ("AK-47", "Smoke Grenade").
+        "armor": first_present(ticks_df, ["armor", "armor_value"]),
+        "helmet": first_present(ticks_df, ["has_helmet"]),
+        "defuser": first_present(ticks_df, ["has_defuser"]),
+        "inventory": first_present(ticks_df, ["inventory"]),
     }
     missing = [k for k in ("tick", "name", "x", "y") if cols[k] is None]
     if missing:
@@ -344,7 +350,8 @@ def parse(demo_path: Path, pov_name: str | None):
 
     # per-tick frame rows
     keep = [cols["tick"], cols["name"], cols["x"], cols["y"]]
-    for opt in ("z", "yaw", "health", "team", "round", "alive", "place"):
+    for opt in ("z", "yaw", "health", "team", "round", "alive", "place",
+                "armor", "helmet", "defuser", "inventory"):
         if cols[opt]:
             keep.append(cols[opt])
     frame_rows = sampled.select(keep).sort(cols["tick"]).to_dicts()
@@ -359,6 +366,19 @@ def parse(demo_path: Path, pov_name: str | None):
     # group into { tick: [ {player}, ... ] }
     frames = {}
     frame_round = {}        # tick -> round_num, shared by every player at that tick
+
+    # Loadout interning: item_names holds every distinct item string, loadouts
+    # holds each distinct combination as a list of indices into it.
+    item_names, item_ids = [], {}
+    loadouts, loadout_index = [], {}
+
+    def item_id(name):
+        idx = item_ids.get(name)
+        if idx is None:
+            idx = len(item_names)
+            item_ids[name] = idx
+            item_names.append(name)
+        return idx
     skipped_null = 0
     for r in frame_rows:
         t = r[cols["tick"]]
@@ -397,6 +417,28 @@ def parse(demo_path: Path, pov_name: str | None):
                 entry["pl"] = idx
                 place_points[idx][0].append(entry["x"])
                 place_points[idx][1].append(entry["y"])
+        if cols["armor"] and r.get(cols["armor"]) is not None:
+            armor = int(num(r[cols["armor"]]))
+            if armor:
+                entry["ar"] = armor
+        if cols["helmet"] and r.get(cols["helmet"]):
+            entry["hm"] = 1
+        if cols["defuser"] and r.get(cols["defuser"]):
+            entry["df"] = 1
+        if cols["inventory"]:
+            # A loadout changes on a buy or a pickup, so across 40,000 player
+            # samples there are only a few hundred distinct ones. Interning the
+            # whole loadout costs one integer per player per frame; storing the
+            # item list inline would roughly double the file.
+            inv = r.get(cols["inventory"]) or []
+            key = tuple(sorted(str(i) for i in inv))
+            idx = loadout_index.get(key)
+            if idx is None:
+                idx = len(loadouts)
+                loadout_index[key] = idx
+                loadouts.append([item_id(i) for i in key])
+            if loadouts[idx]:
+                entry["eq"] = idx
         # Round number is a property of the tick, not of each player standing on
         # it, so it goes on the frame rather than being repeated ten times.
         if cols["round"] and r.get(cols["round"]) is not None:
@@ -430,6 +472,9 @@ def parse(demo_path: Path, pov_name: str | None):
     if place_names:
         print(f"[*] {len(place_names)} callouts seen, {len(places)} with "
               f">={MIN_PLACE_SAMPLES} samples to label")
+    if item_names:
+        print(f"[*] {len(item_names)} distinct items in "
+              f"{len(loadouts)} distinct loadouts")
 
     # ---- rounds ----
     round_rows = to_dicts(rounds_df)
@@ -576,6 +621,10 @@ def parse(demo_path: Path, pov_name: str | None):
         # is the derived label position for each callout the viewer can draw.
         "place_names": place_names,
         "places": places,
+        # item_names is the lookup table for loadouts; each frame entry's `eq`
+        # indexes into loadouts, which indexes into item_names.
+        "item_names": item_names,
+        "loadouts": loadouts,
         "utility": utility,
         "bomb": bomb_events,
         "stats": stats,
