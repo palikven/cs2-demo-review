@@ -2,5 +2,15 @@
 REM Parse a demo:  parse_demo.bat path\to\match.dem [YourFaceitName]
 cd /d "%~dp0"
 if "%~1"=="" (echo Usage: parse_demo.bat path\to\match.dem [YourFaceitName] & pause & exit /b 1)
+
 if "%~2"=="" (python parser\parse_demo.py "%~1") else (python parser\parse_demo.py "%~1" --pov "%~2")
+if errorlevel 1 (pause & exit /b 1)
+
+REM Build the death review too. No API key needed - it's all arithmetic - and
+REM without it the viewer's coach panel has nothing to show.
+python parser\analyze.py "data\%~n1.json" --emit
+
+echo.
+echo Done. Run run_viewer.bat, then open:
+echo   http://localhost:8000/viewer/index.html?match=%~n1
 pause
