@@ -51,8 +51,14 @@
   .prow{display:grid;grid-template-columns:8px 1fr auto;gap:9px;align-items:center;
     padding:7px 8px;border-radius:6px;font-size:13px;background:var(--panel-2)}
   .prow .dot{width:8px;height:8px;border-radius:50%}
-  .prow .nm{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .prow .nmwrap{min-width:0}
+  .prow .nm{display:block;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* current callout, under the name - the whole point of the roster now */
+  .prow .pl{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.05em;
+    text-transform:uppercase;color:var(--ink-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .prow.dead .pl{visibility:hidden}
   .prow .kd{font-family:var(--mono);font-size:12px;color:var(--ink-dim)}
+  .loadbtn.off{opacity:.5}
   .prow.dead{opacity:.4}
   .prow.dead .nm{text-decoration:line-through}
   .prow.pov{outline:1px solid var(--accent)}
@@ -113,8 +119,10 @@
       <span>MAP <b id="m-map">—</b></span>
       <span>ROUNDS <b id="m-rounds">—</b></span>
       <span>POV <b id="m-pov">—</b></span>
+      <span>AT <b id="m-place">—</b></span>
     </div>
-    <label class="loadbtn">LOAD MATCH JSON<input type="file" id="file" accept=".json"></label>
+    <button class="loadbtn" id="toggle-callouts" style="margin-left:auto" title="Toggle map callout labels">CALLOUTS ON</button>
+    <label class="loadbtn" style="margin-left:8px">LOAD MATCH JSON<input type="file" id="file" accept=".json"></label>
   </header>
 
   <main>
@@ -171,6 +179,9 @@ let lastTick = -Infinity;  // highest game tick already drawn, for kill markers
 let radarImg = new Image();
 let radarReady=false, worldToPx=null;
 let killMarks=[];         // {x,y,born} on overlay - ages in milliseconds, not frames
+let PLACES = {};          // callout name -> {x,y,n} label anchor, from the parser
+let PLACE_NAMES = [];     // index -> callout name, for the per-entry `pl` field
+let showCallouts = true;
 
 const KILL_MARK_MS = 1500;   // how long a kill ring stays on screen
 // Max distance a player can legitimately cover between two samples. CS2 run
@@ -221,10 +232,18 @@ async function loadMatch(data){
   radarImg.src = `../radars/${data.map}.png`;
   worldToPx = makeTransform(data.map);
 
+  // callout labels: name -> {x,y,n}. Absent on JSON from an older parser, so
+  // everything downstream has to treat an empty table as "no callouts", not
+  // as an error.
+  PLACES = data.places || {};
+  PLACE_NAMES = data.place_names || [];
+
   buildRounds();
   selectRound(firstRound());
   buildRoster();
-  selectPlayer(data.pov || (data.players[0]&&data.players[0].name));
+  // data.rounds is optional-chained one line above; data.players was not, so a
+  // JSON without a player list threw here instead of loading with an empty roster.
+  selectPlayer(data.pov || (data.players?.[0]&&data.players[0].name));
 }
 
 function firstRound(){
@@ -309,7 +328,7 @@ function buildRoster(){
     row.className="prow"+(p.name===M.pov?" pov":"");
     row.dataset.name=p.name;
     row.innerHTML=`<span class="dot" data-dot></span>
-      <span class="nm">${esc(p.name)}</span>
+      <span class="nmwrap"><span class="nm">${esc(p.name)}</span><span class="pl" data-pl></span></span>
       <span class="kd">${st.kills??0}–${st.deaths??0}</span>`;
     row.onclick=()=>selectPlayer(p.name);
     el.appendChild(row);
@@ -331,6 +350,52 @@ function selectPlayer(name){
     `<div class="stat"><div class="v ${c[3]||''}">${c[1]}</div><div class="l">${c[2]}</div></div>`).join("");
 }
 
+// ---- callout labels ----
+// Drawn on the RADAR canvas, not the overlay: they're static for the whole
+// match, so they belong with the map image rather than being re-stroked
+// alongside ten players every animation frame.
+//
+// Valve's internal names are jammed-together CamelCase ("BombsiteA",
+// "LowerTunnel"). Split them so the map reads like a callout and not like a
+// symbol dump.
+// Resolve a frame entry's interned callout index back to its name. Older JSON
+// has no `pl` at all, so this quietly returns null rather than "undefined".
+function placeOf(pl){
+  if(!pl || pl.pl==null) return null;
+  return PLACE_NAMES[pl.pl] || null;
+}
+function calloutLabel(name){
+  return String(name)
+    .replace(/([a-z])([A-Z])/g,"$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g,"$1 $2")
+    .toUpperCase();
+}
+function drawCallouts(){
+  if(!showCallouts || !worldToPx) return;
+  const names = Object.keys(PLACES);
+  if(!names.length) return;
+  rctx.save();
+  rctx.font = "600 11px "+(getCSS('--mono')||"monospace");
+  rctx.textAlign = "center";
+  rctx.textBaseline = "middle";
+  for(const name of names){
+    const c = PLACES[name];
+    if(!c || c.x==null || c.y==null) continue;
+    const p = worldToPx(c.x, c.y);
+    if(p.x<0||p.y<0||p.x>radar.width||p.y>radar.height) continue;
+    const text = calloutLabel(name);
+    // Radar art runs from near-black to near-white, so neither a light nor a
+    // dark label is readable everywhere. Stroke a dark halo behind the glyphs
+    // and the text survives both.
+    rctx.lineWidth = 3;
+    rctx.strokeStyle = "rgba(6,9,13,.85)";
+    rctx.strokeText(text, p.x, p.y);
+    rctx.fillStyle = "rgba(190,205,225,.62)";
+    rctx.fillText(text, p.x, p.y);
+  }
+  rctx.restore();
+}
+
 // ---- draw ----
 function draw(){
   rctx.clearRect(0,0,radar.width,radar.height);
@@ -338,6 +403,7 @@ function draw(){
   else { rctx.fillStyle="#0b0e13"; rctx.fillRect(0,0,radar.width,radar.height);
     rctx.fillStyle="#2a3444"; rctx.font="13px monospace"; rctx.textAlign="center";
     rctx.fillText("radar image missing for "+(M?.map||""), radar.width/2, radar.height/2);}
+  drawCallouts();
   octx.clearRect(0,0,radar.width,radar.height);
   if(!frames.length||!worldToPx){ drawKillfeed(null); return; }
 
@@ -387,14 +453,20 @@ function draw(){
     octx.beginPath(); octx.arc(p.x,p.y,alive?6:4,0,7);
     octx.fillStyle=col; octx.fill();
     if(pl.n===selected){octx.strokeStyle=getCSS('--accent');octx.lineWidth=2;octx.stroke();}
-    // name for selected/pov
+    // name for selected/pov, with the callout they're standing in under it
     if(pl.n===selected){
-      octx.fillStyle=getCSS('--ink'); octx.font="11px monospace"; octx.textAlign="center";
+      octx.textAlign="center";
+      octx.fillStyle=getCSS('--ink'); octx.font="11px monospace";
       octx.fillText(pl.n,p.x,p.y-11);
+      const where = placeOf(pl);
+      if(where && alive){
+        octx.fillStyle=getCSS('--accent'); octx.font="9px monospace";
+        octx.fillText(calloutLabel(where),p.x,p.y-22);
+      }
     }
   });
 
-  // roster alive/dead sync
+  // roster alive/dead sync + current callout
   document.querySelectorAll(".prow").forEach(r=>{
     const pl=(fr.players||[]).find(x=>x.n===r.dataset.name);
     const alive=pl&&pl.a!==false&&(pl.hp==null||pl.hp>0);
@@ -402,7 +474,18 @@ function draw(){
     const dot=r.querySelector("[data-dot]");
     if(pl){const isT=(pl.t||"").toUpperCase().startsWith("T");
       dot.style.background=isT?getCSS('--t'):getCSS('--ct');}
+    const plEl=r.querySelector("[data-pl]");
+    if(plEl){
+      const where = pl ? placeOf(pl) : null;
+      plEl.textContent = where ? calloutLabel(where) : "";
+    }
   });
+
+  // header "AT <callout>" for whoever is selected
+  const sel=(fr.players||[]).find(x=>x.n===selected);
+  const selAlive=sel&&sel.a!==false&&(sel.hp==null||sel.hp>0);
+  const selWhere=sel&&selAlive?placeOf(sel):null;
+  $("#m-place").textContent = selWhere ? calloutLabel(selWhere) : "—";
 
   // clock - real round time now that pos is continuous
   $("#c-cur").textContent = clockStr(pos*frameMs()/1000);
@@ -429,7 +512,17 @@ function resetKillCursor(){
   const i=Math.max(0,Math.min(Math.floor(pos),frames.length-1));
   lastTick = frames[i].tick!=null ? frames[i].tick : -Infinity;
 }
-function getCSS(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim();}
+// Cached because this used to run getComputedStyle() 2-4x PER PLAYER PER FRAME
+// (colour lookups inside the draw loop). At 144Hz with ten players that is a
+// forced style recalc several hundred times a second for values that only ever
+// change when someone edits the stylesheet.
+const _cssCache = {};
+function getCSS(v){
+  if(_cssCache[v]===undefined){
+    _cssCache[v]=getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  }
+  return _cssCache[v];
+}
 
 // ---- killfeed ----
 // Deliberately a PURE FUNCTION of the current tick: the feed is "every kill in
@@ -559,11 +652,21 @@ $("#play").onclick=()=>{
 };
 $("#seek").oninput=e=>seekTo(+e.target.value);
 $("#speed").onclick=()=>{speed=speed>=4?0.5:speed*2;$("#speed").textContent=speed+"×";};
+function toggleCallouts(){
+  showCallouts=!showCallouts;
+  const b=$("#toggle-callouts");
+  b.textContent = showCallouts?"CALLOUTS ON":"CALLOUTS OFF";
+  b.classList.toggle("off",!showCallouts);
+  dirty=true; draw();
+}
+$("#toggle-callouts").onclick=toggleCallouts;
 document.addEventListener("keydown",e=>{
+  if(e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA") return;
   if(e.code==="Space"){e.preventDefault();$("#play").click();}
   // arrows step one sample (~0.5s) from wherever we are
   if(e.code==="ArrowRight"){e.preventDefault();seekTo(Math.floor(pos)+1);}
   if(e.code==="ArrowLeft"){e.preventDefault();seekTo(Math.ceil(pos)-1);}
+  if(e.code==="KeyC"){e.preventDefault();toggleCallouts();}
 });
 $("#file").onchange=e=>{
   const f=e.target.files[0]; if(!f)return;
@@ -572,10 +675,17 @@ $("#file").onchange=e=>{
   rd.readAsText(f);
 };
 
-// ---- boot: load calibration, then sample if present ----
+// ---- boot: load calibration, then a match if one is available ----
+// ?match=<name> loads data/<name>.json. Without it we fall back to the tiny
+// synthetic sample, which is a 1-round toy - fine as a placeholder, misleading
+// as a default when there's a real parsed match sitting in data/.
 fetch(CAL_URL).then(r=>r.json()).then(c=>{CAL=c;
-  // try auto-loading the sample for convenience
-  fetch("../data/_sample_mirage.json").then(r=>r.ok?r.json():null).then(d=>{if(d)loadMatch(d);}).catch(()=>{});
+  const want = new URLSearchParams(location.search).get("match");
+  const tryLoad = name =>
+    fetch(`../data/${name}.json`).then(r=>r.ok?r.json():null).catch(()=>null);
+  (want ? tryLoad(want) : Promise.resolve(null))
+    .then(d => d || tryLoad("_sample_mirage"))
+    .then(d => { if(d) loadMatch(d); });
 }).catch(()=>{ $("#empty").innerHTML="<div>map_calibration.json failed to load</div>";});
 </script>
 </body>
