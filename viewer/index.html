@@ -287,6 +287,7 @@ async function loadMatch(data){
   radarImg.onerror=()=>{radarReady=false; draw();};
   radarImg.src = `../radars/${data.map}.png`;
   worldToPx = makeTransform(data.map);
+  preloadGrenadeIcons();
 
   // callout labels: name -> {x,y,n}. Absent on JSON from an older parser, so
   // everything downstream has to treat an empty table as "no callouts", not
@@ -493,6 +494,7 @@ function drawUtility(curTick){
   const rate=(M&&M.tickrate)||64;
 
   // throw arcs first, so live smoke sits on top of its own trajectory
+  const inFlight=[];
   for(const t of UTIL.throws||[]){
     if(curTick < t.s || curTick > t.e + THROW_TRAIL*rate) continue;
     const pts=t.p; if(!pts||pts.length<2) continue;
@@ -511,6 +513,17 @@ function drawUtility(curTick){
     }
     octx.stroke();
     octx.restore();
+    // Only while it's actually airborne. Once it lands the smoke/fire area or
+    // the detonation pop takes over, and leaving the icon there just doubles
+    // up on the same information.
+    if(curTick<=t.e) inFlight.push({t,fade:Math.max(0,fade)});
+  }
+  // icons after every arc, so a marker is never buried under a later line
+  for(const {t,fade} of inFlight){
+    const head=throwHead(t,curTick);
+    if(!head) continue;
+    const p=worldToPx(head.x,head.y);
+    drawGrenadeIcon(t.kind,t.side,p.x,p.y,fade);
   }
 
   // active smokes
@@ -576,6 +589,62 @@ function drawUtility(curTick){
     octx.lineTo(p.x-7,p.y); octx.closePath(); octx.fill();
     octx.restore();
   }
+}
+
+// ---- grenade icons ----
+// Valve's own artwork, the same set the killfeed uses. They're pure white, so
+// on a pale radar area a bare icon disappears - each one gets a dark disc
+// behind it and a ring in the kind's colour, which doubles as the legend.
+const GRENADE_ICON_FILES = {
+  smoke:"smokegrenade", fire:"molotov", flash:"flashbang",
+  he:"hegrenade", decoy:"decoy",
+};
+const GRENADE_ICONS = {};
+function preloadGrenadeIcons(){
+  for(const [kind,file] of Object.entries(GRENADE_ICON_FILES)){
+    if(GRENADE_ICONS[kind]) continue;
+    const img=new Image();
+    // icons/ is gitignored - it's extracted from the user's own CS2 install -
+    // so a missing file is expected, not an error. The arc still draws.
+    img.onload =()=>{ GRENADE_ICONS[kind]=img; dirty=true; draw(); };
+    img.onerror=()=>{ GRENADE_ICONS[kind]=null; };
+    img.src=`icons/${file}.svg`;
+  }
+}
+
+const ICON_H = 13;          // drawn height in canvas px; width follows the art
+const ICON_DISC = 9.5;
+
+// Where the grenade is right now, interpolated along its sampled arc.
+function throwHead(t, curTick){
+  const pts=t.p;
+  if(!pts||pts.length<2) return null;
+  const frac=Math.max(0,Math.min(1,(curTick-t.s)/Math.max(1,t.e-t.s)));
+  const f=frac*(pts.length-1);
+  const i=Math.min(pts.length-2, Math.floor(f));
+  const k=f-i;
+  return {x:lerp(pts[i][0],pts[i+1][0],k), y:lerp(pts[i][1],pts[i+1][1],k)};
+}
+
+function drawGrenadeIcon(kind, side, px, py, alpha){
+  octx.save();
+  octx.globalAlpha=alpha;
+  // dark disc so a white icon survives a pale radar
+  octx.fillStyle="rgba(8,11,15,.82)";
+  octx.beginPath(); octx.arc(px,py,ICON_DISC,0,7); octx.fill();
+  octx.strokeStyle=utilColour(kind,side); octx.lineWidth=1.4;
+  octx.beginPath(); octx.arc(px,py,ICON_DISC,0,7); octx.stroke();
+
+  const img=GRENADE_ICONS[kind];
+  if(img && img.naturalWidth){
+    const h=ICON_H, w=h*(img.naturalWidth/img.naturalHeight);
+    octx.drawImage(img, px-w/2, py-h/2, w, h);
+  }else{
+    // no artwork available - a dot still says "something is in the air here"
+    octx.fillStyle=utilColour(kind,side);
+    octx.beginPath(); octx.arc(px,py,3,0,7); octx.fill();
+  }
+  octx.restore();
 }
 
 // world units -> canvas pixels, from the same calibration the transform uses
