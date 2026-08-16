@@ -18,7 +18,7 @@
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--sans)}
-  body{display:grid;grid-template-columns:1fr 320px;grid-template-rows:auto 1fr auto;height:100vh;overflow:hidden}
+  body{display:grid;grid-template-columns:1fr 360px;grid-template-rows:auto 1fr auto;height:100vh;overflow:hidden}
 
   header{
     grid-column:1/-1;display:flex;align-items:center;gap:20px;
@@ -62,6 +62,32 @@
   .prow.dead{opacity:.4}
   .prow.dead .nm{text-decoration:line-through}
   .prow.pov{outline:1px solid var(--accent)}
+
+  /* coach rail */
+  #coach{display:flex;flex-direction:column;gap:10px;margin-bottom:20px}
+  .card{background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:10px 11px}
+  .card.live{border-color:var(--danger)}
+  .card .hd{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--ink-faint);display:flex;justify-content:space-between;gap:8px;margin-bottom:7px}
+  .card .hd b{color:var(--danger)}
+  .card .ln{font-size:12.5px;line-height:1.45;margin:0 0 5px}
+  .card .ln:last-child{margin-bottom:0}
+  .card .where{font-family:var(--mono);font-size:12px;color:var(--ink)}
+  .card .where i{color:var(--ink-faint);font-style:normal}
+  .tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px}
+  .tag{font-family:var(--mono);font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;
+    border:1px solid var(--line);border-radius:3px;padding:2px 5px;color:var(--ink-dim)}
+  .tag.bad{border-color:var(--danger);color:var(--danger)}
+  .tag.warn{border-color:var(--t);color:var(--t)}
+  .tip{border-left:2px solid var(--accent);padding-left:8px;margin-top:8px;font-size:12.5px;line-height:1.45}
+  .tip .vd{color:var(--ink-dim);margin-bottom:4px}
+  .muted{color:var(--ink-faint);font-size:12px;line-height:1.5}
+  .muted code{color:var(--accent);background:var(--panel-2);padding:1px 5px;border-radius:3px;
+    font-family:var(--mono);font-size:11px}
+  .rbtn.flag{position:relative}
+  .rbtn.flag::after{content:"";position:absolute;top:2px;right:2px;width:4px;height:4px;
+    border-radius:50%;background:var(--danger)}
+  .rbtn.active.flag::after{background:#06120c}
 
   .statgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
   .stat{background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:9px 10px}
@@ -138,6 +164,8 @@
   </main>
 
   <aside>
+    <div class="rail-h">Coach</div>
+    <div id="coach"></div>
     <div class="rail-h">Roster</div>
     <div class="roster" id="roster"></div>
     <div class="rail-h">Selected player</div>
@@ -182,6 +210,13 @@ let killMarks=[];         // {x,y,born} on overlay - ages in milliseconds, not f
 let PLACES = {};          // callout name -> {x,y,n} label anchor, from the parser
 let PLACE_NAMES = [];     // index -> callout name, for the per-entry `pl` field
 let showCallouts = true;
+// Two separate layers, and the split matters:
+//   ANALYSIS is arithmetic from analyze.py - always true, always available.
+//   COACH is the model's reading of it - optional, and absent without an API key.
+// The panel is built so the deterministic half stands on its own.
+let ANALYSIS = null;
+let COACH = null;
+let coachKey = null;      // last rendered state, so we only touch the DOM on change
 
 const KILL_MARK_MS = 1500;   // how long a kill ring stays on screen
 // Max distance a player can legitimately cover between two samples. CS2 run
@@ -238,12 +273,27 @@ async function loadMatch(data){
   PLACES = data.places || {};
   PLACE_NAMES = data.place_names || [];
 
+  // Sidecars, both optional. Cleared first so switching matches can't leave
+  // the previous match's coaching on screen.
+  ANALYSIS = null; COACH = null; coachKey = null;
+  if(data._name) loadSidecars(data._name);
+
   buildRounds();
   selectRound(firstRound());
   buildRoster();
   // data.rounds is optional-chained one line above; data.players was not, so a
   // JSON without a player list threw here instead of loading with an empty roster.
   selectPlayer(data.pov || (data.players?.[0]&&data.players[0].name));
+}
+
+// data/<name>_analysis.json and data/<name>_coach.json. Both are optional and a
+// missing one is the normal case, not an error - the analysis needs a separate
+// command, and the coaching needs an API key on top of that.
+function loadSidecars(name){
+  fetch(`../data/${name}_analysis.json`).then(r=>r.ok?r.json():null).catch(()=>null)
+    .then(a=>{ if(a){ ANALYSIS=a; coachKey=null; buildRounds(); dirty=true; draw(); }});
+  fetch(`../data/${name}_coach.json`).then(r=>r.ok?r.json():null).catch(()=>null)
+    .then(c=>{ if(c){ COACH=c; coachKey=null; buildRounds(); dirty=true; draw(); }});
 }
 
 function firstRound(){
@@ -296,10 +346,15 @@ function buildRounds(){
   }
 
   const winners={}; (M.rounds||[]).forEach((r,i)=>{ winners[(r.round_num??i+1)] = (r.winner||"").toString().toUpperCase();});
+  // rounds the reviewed player died in - a dot on the timeline so you can jump
+  // straight to the moments worth reviewing instead of scrubbing for them
+  const flagged=new Set((ANALYSIS?.deaths||[]).map(d=>d.round));
   rlist.forEach(r=>{
     const b=document.createElement("button");
-    b.className="rbtn"+(winners[r]==="T"?" t-win":winners[r]==="CT"?" ct-win":"");
+    b.className="rbtn"+(winners[r]==="T"?" t-win":winners[r]==="CT"?" ct-win":"")
+      +(flagged.has(r)?" flag":"");
     b.textContent=r; b.dataset.r=r;
+    if(flagged.has(r)) b.title=`${ANALYSIS.player} died this round`;
     b.onclick=()=>selectRound(r);
     roundsEl.appendChild(b);
   });
@@ -502,6 +557,124 @@ function draw(){
     lastTick = curTick;
   }
   drawKillfeed(curTick);
+  drawCoach(curTick);
+}
+
+// ---- coach panel ----
+// Same contract as the killfeed and for the same reason: a PURE FUNCTION of the
+// current tick. Nothing queued, nothing remembered. Scrubbing backwards,
+// jumping rounds and changing speed then all stay correct with no bookkeeping,
+// and a stale tip can't survive a round change.
+const DEATH_CARD_LEAD = 8;    // seconds of game time before a death to arm the card
+const DEATH_CARD_HOLD = 6;    // ...and after it
+
+function tagsFor(d){
+  const t=[];
+  if(d.opening) t.push(["opening duel","warn"]);
+  if(!d.traded) t.push(["untraded","bad"]);
+  if(d.repeek) t.push([`re-peek +${d.repeek_after}s`,"bad"]);
+  if(d.isolated) t.push(["isolated","bad"]);
+  if(d.man_state==="down") t.push(["already down",""]);
+  if(d.post_plant) t.push(["post-plant",""]);
+  if(d.awp) t.push(["awp",""]);
+  if(d.blind) t.push(["they were flashed",""]);
+  if(d.smoke) t.push(["through smoke",""]);
+  if(d.wallbang) t.push(["wallbang",""]);
+  return t;
+}
+
+function deathCard(d, live){
+  const tip = (COACH?.deaths||[]).find(x=>x.round===d.round && x.tick===d.tick);
+  const mate = d.nearest_mate!=null
+    ? `nearest teammate <b>${Math.round(d.nearest_mate)}u</b>`
+    : `<b>last alive</b>`;
+  return `<div class="card${live?" live":""}">
+    <div class="hd"><span>R${d.round} · ${d.t}s${live?" · <b>DEATH</b>":""}</span>
+      <span>${d.alive_own}v${d.alive_enemy}</span></div>
+    <div class="where">${esc(calloutLabel(d.victim_place||"?"))}
+      <i>&lt;-</i> ${esc(calloutLabel(d.attacker_place||"?"))}
+      <i>·</i> ${esc(d.weapon||"?")}</div>
+    <div class="ln" style="margin-top:6px;color:var(--ink-dim)">${mate}</div>
+    <div class="tags">${tagsFor(d).map(([txt,cls])=>
+      `<span class="tag ${cls}">${esc(txt)}</span>`).join("")}</div>
+    ${tip?`<div class="tip"><div class="vd">${esc(tip.verdict)}</div>${esc(tip.tip)}</div>`:""}
+  </div>`;
+}
+
+function patternCards(){
+  const places=(ANALYSIS?.death_places||[]).filter(p=>p.notable);
+  const aiPatterns=COACH?.patterns||[];
+  if(!places.length && !aiPatterns.length) return "";
+  let html=`<div class="rail-h" style="margin-top:4px">Repeat patterns</div>`;
+  for(const p of places){
+    const ai=aiPatterns.find(x=>(x.detail||"").includes(p.place)||(x.title||"").includes(p.place));
+    const angles=p.from.map(f=>`${calloutLabel(f.place)} x${f.n}`).join(", ");
+    html+=`<div class="card">
+      <div class="hd"><span>${esc(calloutLabel(p.place))}</span>
+        <span><b>${p.deaths}</b> deaths</span></div>
+      <div class="ln" style="color:var(--ink-dim)">${p.untraded} untraded${
+        p.repeeks?`, ${p.repeeks} re-peeking a lost duel`:""} · rounds ${p.rounds.join(", ")}</div>
+      <div class="ln" style="color:var(--ink-faint);font-family:var(--mono);font-size:11px">
+        killed from ${esc(angles)}</div>
+      ${ai?`<div class="tip"><div class="vd">${esc(ai.detail)}</div>${esc(ai.tip)}</div>`:""}
+    </div>`;
+  }
+  for(const p of aiPatterns.filter(x=>!places.some(pl=>
+      (x.detail||"").includes(pl.place)||(x.title||"").includes(pl.place)))){
+    html+=`<div class="card"><div class="hd"><span>${esc(p.title)}</span></div>
+      <div class="ln" style="color:var(--ink-dim)">${esc(p.detail)}</div>
+      <div class="tip">${esc(p.tip)}</div></div>`;
+  }
+  return html;
+}
+
+function drawCoach(curTick){
+  const el=$("#coach");
+  if(!ANALYSIS){
+    const key="none";
+    if(coachKey!==key){
+      coachKey=key;
+      el.innerHTML=`<div class="muted">No analysis for this match yet.<br><br>
+        <code>python parser/analyze.py data/${esc(M?.map?(M.pov||"match"):"match")}.json --emit</code>
+        <br><br>builds the death review. <code>parser/coach.py</code> then adds
+        AI verdicts on top.</div>`;
+    }
+    return;
+  }
+
+  const deaths=ANALYSIS.deaths||[];
+  const rate=(M&&M.tickrate)||64;
+  // "near" is measured in GAME time so the window doesn't shrink at 4x speed
+  const live=curTick==null?null:deaths.find(d=>
+    curTick >= d.tick - DEATH_CARD_LEAD*rate && curTick <= d.tick + DEATH_CARD_HOLD*rate);
+  // otherwise show whichever death belongs to the round being watched
+  const rnd=currentRound();
+  const inRound=deaths.filter(d=>d.round===rnd);
+  const roundTip=(COACH?.rounds||[]).find(r=>r.round===rnd);
+
+  const key=[live?live.tick:"-",rnd,inRound.map(d=>d.tick).join(","),
+             COACH?"c":"-"].join("|");
+  if(key===coachKey) return;
+  coachKey=key;
+
+  let html="";
+  if(COACH?.summary) html+=`<div class="card"><div class="ln">${esc(COACH.summary)}</div></div>`;
+  if(roundTip) html+=`<div class="card"><div class="hd"><span>Round ${rnd}</span></div>
+    <div class="tip">${esc(roundTip.tip)}</div></div>`;
+
+  if(live) html+=deathCard(live,true);
+  else if(inRound.length) html+=inRound.map(d=>deathCard(d,false)).join("");
+  else html+=`<div class="muted">${esc(ANALYSIS.player)} survived round ${rnd}.</div>`;
+
+  html+=patternCards();
+  el.innerHTML=html;
+}
+
+function currentRound(){
+  if(!frames.length) return null;
+  const i=Math.max(0,Math.min(Math.floor(pos),frames.length-1));
+  const f=frames[i];
+  return f.round!=null?f.round:f._r;
 }
 
 // Re-arm the kill cursor at the current position without firing anything.
@@ -681,8 +854,12 @@ $("#file").onchange=e=>{
 // as a default when there's a real parsed match sitting in data/.
 fetch(CAL_URL).then(r=>r.json()).then(c=>{CAL=c;
   const want = new URLSearchParams(location.search).get("match");
+  // _name is how loadMatch knows which sidecars to look for. A match dropped in
+  // via the file picker has no name we can derive a URL from, so it just
+  // doesn't get one and the coach panel says so.
   const tryLoad = name =>
-    fetch(`../data/${name}.json`).then(r=>r.ok?r.json():null).catch(()=>null);
+    fetch(`../data/${name}.json`).then(r=>r.ok?r.json():null)
+      .then(d => { if(d) d._name = name; return d; }).catch(()=>null);
   (want ? tryLoad(want) : Promise.resolve(null))
     .then(d => d || tryLoad("_sample_mirage"))
     .then(d => { if(d) loadMatch(d); });

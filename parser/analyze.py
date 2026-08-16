@@ -475,10 +475,24 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("match", help="data/<match>.json from parse_demo.py")
     ap.add_argument("--player", default=None, help="defaults to the match POV")
+    ap.add_argument("--emit", action="store_true",
+                    help="write data/<match>_analysis.json for the viewer")
     args = ap.parse_args()
 
-    match = json.loads(Path(args.match).read_text())
+    path = Path(args.match)
+    match = json.loads(path.read_text())
     a = analyze(match, args.player)
+
+    if args.emit:
+        # The viewer's death review is built from THIS, not from the AI layer.
+        # Everything here is arithmetic, so the panel works with no API key and
+        # coach.json only ever adds interpretation on top of it.
+        out_path = path.with_name(path.stem + "_analysis.json")
+        out_path.write_text(json.dumps(a, separators=(",", ":")))
+        size = out_path.stat().st_size / 1000
+        print(f"[+] Wrote {out_path.name} ({size:.0f} KB, "
+              f"{a['totals']['deaths']} deaths for {a['player']})")
+        return
 
     print(f"{a['player']} on {a['map']} - {a['totals']['deaths']} deaths, "
           f"{a['totals']['kills']} kills over {a['rounds_played']} rounds\n")
