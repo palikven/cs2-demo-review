@@ -94,6 +94,27 @@ def build_facts(a, match):
         f"Map: {a['map']}",
         f"Rounds played: {a['rounds_played']}",
         f"Deaths: {t['deaths']}   Kills: {t['kills']}",
+    ]
+
+    # How the match actually went for this player, and how that compares to the
+    # rest of the server. Without it the model reads a list of deaths with no
+    # sense of whether this was a good game or a bad one, and coaches every
+    # match as though it were a disaster.
+    per = ((match or {}).get("stats") or {}).get("per_player") or {}
+    me = per.get(a["player"])
+    if me and me.get("rating") is not None:
+        lines.append(
+            f"HLTV Rating 1.0: {me['rating']} (1.00 is an average player) | "
+            f"KAST {me.get('kast')}% | ADR {me.get('adr')} | "
+            f"K/D {me.get('kd')} | {me.get('kpr')} kills and "
+            f"{me.get('dpr')} deaths per round")
+        rated = sorted((s["rating"], n) for n, s in per.items()
+                       if s.get("rating") is not None)
+        rank = [n for _, n in rated][::-1].index(a["player"]) + 1
+        lines.append(f"That is rank {rank} of {len(rated)} on the server "
+                     f"(best {rated[-1][0]}, worst {rated[0][0]}).")
+
+    lines += [
         "",
         "DEATHS (each line is one death; `tick` is its id - copy it exactly)",
     ]

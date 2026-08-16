@@ -65,6 +65,9 @@
   .gi-gun{height:13px} .gi-pistol{height:10px;opacity:.6}
   .gi-nade{height:11px} .gi-c4{height:12px;opacity:.95}
   .gi-kit{font-size:11px;color:var(--ct);opacity:.9;line-height:1}
+  /* match rating sits next to the name; 1.00 is the average player */
+  .rat{font-family:var(--mono);font-size:10px;color:var(--ink-faint);margin-left:6px;font-weight:400}
+  .rat.good{color:var(--accent)} .rat.bad{color:var(--danger)}
   .prow.gear.dead .gear-icons{opacity:.25}
 
   /* voice */
@@ -461,13 +464,19 @@ function selectPlayer(name){
   selected=name; dirty=true;
   document.querySelectorAll(".prow").forEach(r=>r.classList.toggle("pov",r.dataset.name===name));
   const st=(M.stats&&M.stats.per_player&&M.stats.per_player[name])||{};
+  // 1.00 is the league-average player, so colouring either side of it is the
+  // whole point of the metric.
+  const rat = st.rating;
   const cells=[
+    ["v",(rat!=null?rat.toFixed(2):"–"),"Rating 1.0",
+      rat==null?"":(rat>=1.10?"good":(rat<0.95?"bad":""))],
+    ["v",(st.kast!=null?st.kast+"%":"–"),"KAST", st.kast>=70?"good":(st.kast<60?"bad":"")],
     ["v",`${st.kills??0}/${st.deaths??0}/${st.assists??0}`,"K / D / A"],
+    ["v",(st.adr!=null?st.adr:"–"),"ADR", st.adr>=80?"good":(st.adr!=null&&st.adr<60?"bad":"")],
     ["v",(st.kd??0),"K/D"],
     ["v",(st.hs_pct??0)+"%","HS %", st.hs_pct>=50?"good":""],
     ["v",(st.entry_win_pct??0)+"%","Entry win", st.entry_win_pct>=50?"good":st.entry_attempts?"bad":""],
     ["v",(st.opening_deaths??0),"Opening deaths", st.opening_deaths>=4?"bad":""],
-    ["v",(st.flash_assists??0),"Flash assists"],
   ];
   $("#statgrid").innerHTML=cells.map(c=>
     `<div class="stat"><div class="v ${c[3]||''}">${c[1]}</div><div class="l">${c[2]}</div></div>`).join("");
@@ -670,7 +679,7 @@ function buildTeams(fr){
       <div class="prow gear" data-name="${esc(n)}">
         <span class="dot ${side}"></span>
         <span class="nmwrap">
-          <span class="nm">${esc(n)}</span>
+          <span class="nm">${esc(n)}<span class="rat" data-rat></span></span>
           <span class="pl" data-pl></span>
         </span>
         <span class="hpn">100</span>
@@ -686,6 +695,15 @@ function buildTeams(fr){
                  barEl:row.querySelector(".hpbar i"),
                  plEl:row.querySelector("[data-pl]"),
                  gearEl:row.querySelector(".gear-icons"), gearKey:null};
+    // Rating is a whole-match figure, so it is written once at build time
+    // rather than being touched every frame like HP.
+    const st=(M.stats&&M.stats.per_player&&M.stats.per_player[n])||{};
+    const rEl=row.querySelector("[data-rat]");
+    if(rEl && st.rating!=null){
+      rEl.textContent=st.rating.toFixed(2);
+      rEl.className="rat "+(st.rating>=1.10?"good":(st.rating<0.95?"bad":""));
+      rEl.title=`HLTV Rating 1.0 · KAST ${st.kast}% · ADR ${st.adr}`;
+    }
     row.onclick=()=>selectPlayer(n);
   });
   return true;

@@ -56,8 +56,14 @@ def build_facts(match):
     for name, st in per.items():
         parts = [
             f"- {name}: {st['kills']}K/{st['deaths']}D/{st['assists']}A",
-            f"K/D {st['kd']}",
         ]
+        # Rating first: it is the single number that orders the scoreboard, so
+        # leading with it stops the model ranking players by raw kills.
+        if st.get("rating") is not None:
+            parts.append(f"HLTV Rating 1.0 {st['rating']}")
+        if st.get("kast") is not None:
+            parts.append(f"KAST {st['kast']}%")
+        parts.append(f"K/D {st['kd']}")
         if st.get("adr") is not None:
             parts.append(f"ADR {st['adr']}")
         parts += [
@@ -94,6 +100,13 @@ PER-PLAYER (one tight line each, only for players with something notable):
 NEXT MATCH (3 bullet points max): the highest-leverage adjustments.
 
 Rules:
+- Rating 1.0 is HLTV's published formula: 1.00 is an average player, ~1.15+ is
+  carrying, below ~0.90 is a passenger. Rank players by rating, not by kills -
+  it already accounts for deaths and rewards multi-kill rounds over the same
+  number of kills spread thinly.
+- KAST is the share of rounds where a player got a kill, an assist, survived,
+  or was traded. High KAST with a low rating means someone contributing without
+  making impact; low KAST means they are dying for nothing.
 - If someone has high opening deaths and low entry win %, that's dying on entry
   without trades - flag it.
 - If untraded deaths are high team-wide, that's a spacing/support problem.

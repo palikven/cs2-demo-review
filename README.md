@@ -155,6 +155,15 @@ post-plant · weapon, range, and whether it came through smoke or a wall
 **Rolled up:** where you keep dying and from which angles · deaths by round
 phase · how isolated you are when you die versus when you win
 
+**Rating:** HLTV Rating 1.0 and KAST per player, shown next to each name and in
+the selected-player panel. Rating 1.0 is HLTV's published formula, so the number
+is the real one — 1.00 is an average player. It's also fed to the AI layers,
+which otherwise rank players by raw kills.
+
+A `rating2_est` field estimates Rating 2.0, but HLTV never published that
+formula; it's a community regression and is named to say so. Treat it as
+indicative, and quote Rating 1.0 if you need a number you can defend.
+
 **Utility (rendered, not yet analysed):** every smoke and molotov with its real
 lifetime · flash and HE detonations · throw arcs · bomb plants, defuses and
 detonations

@@ -645,6 +645,24 @@ def parse(demo_path: Path, pov_name: str | None):
 # --------------------------------------------------------------------------
 TRADE_WINDOW_TICKS = 320   # ~5s at 64-tick
 
+# ---- HLTV Rating ----------------------------------------------------------
+# Rating 1.0 is HLTV's published formula and these are its published league
+# averages, so the number we produce is the real thing rather than a lookalike.
+AVERAGE_KPR = 0.679        # kills per round
+AVERAGE_SPR = 0.317        # survivals per round
+AVERAGE_RMK = 1.277        # the weighted multi-kill term below
+# 1K counts 1, 2K counts 4, 3K counts 9 ... i.e. n^2, which is what makes the
+# metric reward the round-winning multi-kill over four scattered singles.
+MULTI_KILL_WEIGHTS = {1: 1, 2: 4, 3: 9, 4: 16, 5: 25}
+
+# Rating 2.0's formula has never been published. These coefficients are the
+# widely-used community regression against HLTV's displayed numbers - close in
+# practice, but an ESTIMATE, which is why it is exported under a separate key
+# and always labelled as such. Do not present it as HLTV's own figure.
+R2 = {"kast": 0.0073, "kpr": 0.3591, "dpr": -0.5329,
+      "impact": 0.2372, "adr": 0.0032, "const": 0.1587}
+IMPACT = {"kpr": 2.13, "apr": 0.42, "const": -0.41}
+
 
 def is_player_kill(k):
     """
@@ -698,6 +716,12 @@ def compute_stats(kills, rounds, players, pov, kcols, damages=None):
         "damage": 0, "adr": None,
     } for n in names}
 
+    # Per-round bookkeeping for KAST and the multi-kill term. Kept separate
+    # from `per` because these are counts of ROUNDS, not of events: four kills
+    # in one round is one entry here and four in `per[n]["kills"]`.
+    kast_rounds = {n: set() for n in names}      # rounds with a K, A, S or T
+    multi = {n: {} for n in names}               # round -> kills in that round
+
     # group kills by round to find opening duels + trades
     by_round = {}
     for k in kills:
@@ -723,24 +747,38 @@ def compute_stats(kills, rounds, players, pov, kcols, damages=None):
 
         # Trade detection - see is_trade(), shared with the analysis layer so
         # both agree on what counts.
+        died_this_round = set()
         for i, k in enumerate(ks):
             victim = k.get("victim")
             if victim not in per:
                 continue
             per[victim]["deaths"] += 1
+            died_this_round.add(victim)
             traded = is_trade(k, ks[i + 1:])
             per[victim]["traded_deaths" if traded else "untraded_deaths"] += 1
+            # the T in KAST: dying is survivable for the round's purposes if a
+            # teammate trades you
+            if traded:
+                kast_rounds[victim].add(rnd)
 
         for k in ks:
             if is_player_kill(k) and k["attacker"] in per:
                 per[k["attacker"]]["kills"] += 1
+                multi[k["attacker"]][rnd] = multi[k["attacker"]].get(rnd, 0) + 1
+                kast_rounds[k["attacker"]].add(rnd)          # K
                 if k.get("hs"):
                     per[k["attacker"]]["hs_kills"] += 1
             asr = k.get("assister")
             if asr in per:
                 per[asr]["assists"] += 1
+                kast_rounds[asr].add(rnd)                    # A
                 if k.get("flash_assist"):
                     per[asr]["flash_assists"] += 1
+
+        # S: anyone who was not a victim this round lived through it
+        for n in names:
+            if n not in died_this_round:
+                kast_rounds[n].add(rnd)
 
     # rounds_played comes from the round table, not from "rounds that had a kill" -
     # a round can end on the bomb or the clock with nobody dying.
@@ -760,6 +798,15 @@ def compute_stats(kills, rounds, players, pov, kcols, damages=None):
             continue          # team damage does not count toward ADR
         per[a]["damage"] += num(d.get("dmg"), 0)
 
+    # A round with no kills at all never appears in by_round, but everybody
+    # lived through it - so it is a KAST round for all ten players. Without
+    # this, a slow eco or a full save silently drags everyone's KAST down.
+    all_rounds = {r.get("round_num") for r in (rounds or [])
+                  if isinstance(r, dict) and r.get("round_num") is not None}
+    for rnd in all_rounds - set(by_round):
+        for n in names:
+            kast_rounds[n].add(rnd)
+
     # derived rates
     for n, s in per.items():
         s["hs_pct"] = round(100 * s["hs_kills"] / s["kills"], 1) if s["kills"] else 0.0
@@ -769,6 +816,42 @@ def compute_stats(kills, rounds, players, pov, kcols, damages=None):
         )
         s["kd"] = round(s["kills"] / s["deaths"], 2) if s["deaths"] else float(s["kills"])
         s["adr"] = round(s["damage"] / rounds_played, 1) if (damages and rounds_played) else None
+
+    # ---- HLTV ratings ----
+    # After the derived rates, because Rating 2.0 takes ADR as an input.
+    for n, s in per.items():
+        r = rounds_played or 0
+        if not r:
+            s["kast"] = s["kpr"] = s["dpr"] = s["apr"] = 0.0
+            s["impact"] = s["rating"] = 0.0
+            s["rating2_est"] = None
+            continue
+
+        s["kast"] = round(100 * len(kast_rounds[n]) / r, 1)
+        s["kpr"] = round(s["kills"] / r, 3)
+        s["dpr"] = round(s["deaths"] / r, 3)
+        s["apr"] = round(s["assists"] / r, 3)
+
+        # Rating 1.0 - HLTV's published formula, so this is the real number.
+        kill_rating = (s["kills"] / r) / AVERAGE_KPR
+        survival_rating = ((r - s["deaths"]) / r) / AVERAGE_SPR
+        weighted = sum(MULTI_KILL_WEIGHTS.get(c, 0) for c in multi[n].values())
+        rmk_rating = (weighted / r) / AVERAGE_RMK
+        s["rating"] = round(
+            (kill_rating + 0.7 * survival_rating + rmk_rating) / 2.7, 3)
+
+        # Rating 2.0 - ESTIMATED, see the note on R2. ADR is one of its inputs,
+        # so with no damage data the estimate is not meaningful; return None
+        # rather than a confidently wrong number.
+        s["impact"] = round(IMPACT["kpr"] * s["kpr"]
+                            + IMPACT["apr"] * s["apr"] + IMPACT["const"], 3)
+        if s["adr"] is None:
+            s["rating2_est"] = None
+        else:
+            s["rating2_est"] = round(
+                R2["kast"] * s["kast"] + R2["kpr"] * s["kpr"]
+                + R2["dpr"] * s["dpr"] + R2["impact"] * s["impact"]
+                + R2["adr"] * s["adr"] + R2["const"], 3)
 
     return {
         "rounds_played": rounds_played,
