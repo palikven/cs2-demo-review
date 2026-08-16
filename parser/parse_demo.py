@@ -409,6 +409,32 @@ def is_player_kill(k):
     return a is not None and v is not None and a != v
 
 
+def is_trade(kill, later_kills, window=TRADE_WINDOW_TICKS):
+    """
+    Was this death traded? i.e. did a TEAMMATE of the victim kill the killer
+    within `window` ticks?
+
+    The killer merely dying is not a trade - he may have fallen off the map or
+    been teamkilled, and neither buys the victim's team anything. When side data
+    is missing (older parses) we fall back to counting it, because the common
+    case by far is that the person who avenged you was on your team.
+
+    `later_kills` must be the round's remaining kills in tick order.
+    """
+    if not is_player_kill(kill):
+        return False
+    killer = kill.get("attacker")
+    for later in later_kills:
+        if later["tick"] - kill["tick"] > window:
+            break
+        if not is_player_kill(later) or later["victim"] != killer:
+            continue
+        v_side, t_side = kill.get("victim_side"), later.get("attacker_side")
+        if v_side is None or t_side is None or v_side == t_side:
+            return True
+    return False
+
+
 def compute_stats(kills, rounds, players, pov, kcols, damages=None):
     """
     Deterministic per-player stats. Everything here is checkable and true.
@@ -445,28 +471,14 @@ def compute_stats(kills, rounds, players, pov, kcols, damages=None):
                 per[opener["victim"]]["entry_attempts"] += 1
                 per[opener["victim"]]["opening_deaths"] += 1
 
-        # Trade detection: did a TEAMMATE of the victim kill the killer within
-        # the window? The killer merely dying is not a trade - he may have fallen
-        # off the map or been teamkilled, which buys the victim's team nothing.
+        # Trade detection - see is_trade(), shared with the analysis layer so
+        # both agree on what counts.
         for i, k in enumerate(ks):
             victim = k.get("victim")
             if victim not in per:
                 continue
             per[victim]["deaths"] += 1
-
-            killer = k.get("attacker")
-            traded = False
-            if is_player_kill(k):
-                for later in ks[i + 1:]:
-                    if later["tick"] - k["tick"] > TRADE_WINDOW_TICKS:
-                        break
-                    if not is_player_kill(later) or later["victim"] != killer:
-                        continue
-                    # the trader must be on the dead player's side
-                    v_side, t_side = k.get("victim_side"), later.get("attacker_side")
-                    if v_side is None or t_side is None or v_side == t_side:
-                        traded = True
-                        break
+            traded = is_trade(k, ks[i + 1:])
             per[victim]["traded_deaths" if traded else "untraded_deaths"] += 1
 
         for k in ks:
