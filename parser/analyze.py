@@ -518,6 +518,7 @@ def analyze(match, player=None):
     # happened. Attached by tick so a death card can say "this one cost 34% of
     # the round" instead of leaving the reader to judge from the alive counts.
     swing_by_tick, swing_totals, swing_all = {}, {}, {}
+    win_prob, swing_events = [], []
     try:
         import swing as swingmod
         for s in swingmod.compute_swing(match):
@@ -530,6 +531,14 @@ def analyze(match, player=None):
         # and discarding the other nine was wasted work anyway.
         swing_all = swingmod.per_player(match)
         swing_totals = swing_all.get(name, {})
+        # Live readout: P(T win) over time, plus every kill's swing so the
+        # viewer can accumulate a player's contribution as a round plays.
+        win_prob = swingmod.probability_timeline(match)
+        swing_events = [
+            {"t": s["tick"], "r": s["round"], "a": s["attacker"],
+             "v": s["victim"], "g": s["swing"], "c": s["cost"]}
+            for s in swingmod.compute_swing(match)
+        ]
     except Exception as exc:                       # noqa: BLE001
         # The review is useful without swing; losing it should not lose the
         # rest of the analysis.
@@ -552,6 +561,10 @@ def analyze(match, player=None):
         "rounds_played": (match.get("stats") or {}).get("rounds_played"),
         "swing": swing_totals,
         "swing_all": swing_all,
+        # [[tick, P(T win)], ...] - only where it moves, so the viewer can
+        # show a live probability without re-deriving the model in JS.
+        "win_prob": win_prob,
+        "swing_events": swing_events,
         "deaths": deaths,
         "kills": kills,
         "death_places": places,

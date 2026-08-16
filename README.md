@@ -160,9 +160,14 @@ the selected-player panel. Rating 1.0 is HLTV's published formula, so the number
 is the real one — 1.00 is an average player. It's also fed to the AI layers,
 which otherwise rank players by raw kills.
 
-**Round swing:** every death carries what it cost the round in win probability
-— a death at 5v5 is the round, one at 1v3 post-plant was already lost. Shown on
-each death card and summed per player.
+**Round swing:** a live win-probability bar above the team panels that moves as
+the round plays, and a Swing tile that accumulates for the selected player as
+you watch. Every death also carries what it cost — a death at 5v5 is the round,
+one at 1v3 post-plant was already lost.
+
+The bar is hidden during freeze time on purpose: until players respawn the demo
+still reports the previous round's bodies, so any probability read off it would
+be nonsense.
 
 ```
 python parser/swing.py data/2v5.json              # per-player swing

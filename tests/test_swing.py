@@ -263,6 +263,84 @@ class TestBaseline:
         assert S.side_baseline(m) == pytest.approx(8 / 12)
 
 
+class TestLiveWindow:
+    """
+    A round's start..official_end also covers freeze time and the post-round
+    period, and during those the demo still reports the PREVIOUS round's
+    bodies - round 5 of the sample match opens 3v5 because nobody has
+    respawned. Reading a win probability off that is meaningless.
+    """
+
+    def test_the_window_starts_after_the_freeze(self, real_match):
+        w = S.live_windows(real_match)
+        for r in real_match["rounds"]:
+            n = r.get("round_num")
+            if n in w and r.get("freeze_end"):
+                assert w[n][0] == r["freeze_end"]
+                assert w[n][0] > r["start"], "freeze time must be excluded"
+
+    def test_frames_are_clipped_to_it(self, real_match):
+        w = S.live_windows(real_match)
+        clipped = S.frames_by_round(real_match, live_only=True)
+        everything = S.frames_by_round(real_match)
+        assert sum(len(v) for v in clipped.values()) < \
+               sum(len(v) for v in everything.values()), "nothing was clipped"
+        for rnd, frames in clipped.items():
+            lo, hi = w[rnd]
+            for f in frames:
+                assert lo <= f["tick"] <= hi
+
+    def test_stale_pre_round_states_are_excluded(self, real_match):
+        """
+        The concrete symptom: without clipping, the first frames of a round
+        report the previous round's survivors. Assert the clipped set never
+        opens a round with a lopsided alive count.
+        """
+        for rnd, frames in S.frames_by_round(real_match, live_only=True).items():
+            if not frames:
+                continue
+            at, act, _, _ = S.state_at(real_match, frames[0], False)
+            assert at + act >= 8, f"round {rnd} opens {at}v{act} - stale state"
+
+
+class TestProbabilityTimeline:
+    def test_it_only_keeps_points_where_the_value_moves(self, real_match):
+        tl = S.probability_timeline(real_match)
+        frames = sum(len(v) for v in
+                     S.frames_by_round(real_match, live_only=True).values())
+        assert 0 < len(tl) < frames, "timeline should compress"
+
+    def test_points_are_ordered_and_well_formed(self, real_match):
+        tl = S.probability_timeline(real_match)
+        ticks = [p[0] for p in tl]
+        assert ticks == sorted(ticks)
+        for tick, p, rnd in tl:
+            assert 0 <= p <= 1
+            assert rnd is not None
+
+    def test_each_point_carries_its_round(self, real_match):
+        """
+        Without the round on each point a step lookup shows the previous
+        round's final probability all through the next round's freeze time -
+        i.e. last round's result on screen while this one is still buying.
+        """
+        windows = S.live_windows(real_match)
+        for tick, _, rnd in S.probability_timeline(real_match):
+            lo, hi = windows[rnd]
+            assert lo <= tick <= hi
+
+    def test_every_round_gets_at_least_one_point(self, real_match):
+        played = {r["round_num"] for r in real_match["rounds"]}
+        seen = {p[2] for p in S.probability_timeline(real_match)}
+        assert seen <= played
+        assert len(seen) >= len(played) - 1     # a round may be all-clipped
+
+    def test_a_lower_threshold_keeps_more_points(self, real_match):
+        coarse = S.probability_timeline(real_match, min_delta=0.2)
+        fine = S.probability_timeline(real_match, min_delta=0.001)
+        assert len(fine) >= len(coarse)
+
+
 class TestCalibration:
     def test_it_runs_and_reports_a_sample_size(self, real_match):
         c = S.calibrate(real_match)
@@ -277,3 +355,17 @@ class TestCalibration:
         """
         c = S.calibrate(real_match)
         assert c["brier"] < c["baseline_brier"]
+
+    def test_it_scores_only_live_states(self, real_match):
+        """
+        Scoring freeze-time frames would grade the model on states where the
+        demo still shows the previous round's bodies - it would be marked down
+        for predictions it never really made. The state count must therefore
+        match the clipped frame set, not every frame.
+        """
+        c = S.calibrate(real_match)
+        live = sum(len(v) for v in
+                   S.frames_by_round(real_match, live_only=True).values())
+        every = sum(len(v) for v in S.frames_by_round(real_match).values())
+        assert c["states"] <= live
+        assert c["states"] < every, "calibration is scoring non-live frames"

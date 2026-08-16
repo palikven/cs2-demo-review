@@ -45,6 +45,16 @@
 
   /* right rail */
   aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;padding:16px}
+  /* live round win probability */
+  #winprob{padding:2px 10px 8px}
+  .wp-bar{height:6px;border-radius:3px;overflow:hidden;background:var(--ct);
+          box-shadow:inset 0 0 0 1px var(--line)}
+  /* the fill is the T share; whatever is left of the track is the CT share */
+  .wp-bar i{display:block;height:100%;background:var(--t);transition:width .12s linear}
+  .wp-lbl{display:flex;justify-content:space-between;margin-top:3px;
+          font-family:var(--mono);font-size:10px}
+  .wp-lbl .t{color:var(--t)} .wp-lbl .ct{color:var(--ct)}
+
   /* team panels */
   .tm-h{display:flex;justify-content:space-between;align-items:baseline;
         padding:8px 10px 4px;font-family:var(--mono);font-size:10px;
@@ -237,6 +247,10 @@
     </div>
 
     <div class="rail-h">Teams</div>
+    <div id="winprob" style="display:none" title="Estimated chance each side wins this round (our model, not HLTV's)">
+      <div class="wp-bar"><i id="wp-fill"></i></div>
+      <div class="wp-lbl"><span id="wp-t" class="t"></span><span id="wp-ct" class="ct"></span></div>
+    </div>
     <div id="teams"></div>
     <div class="rail-h">Selected player</div>
     <div class="statgrid" id="statgrid"></div>
@@ -487,8 +501,13 @@ function selectPlayer(name){
   const cells=[
     ["v",(rat!=null?rat.toFixed(2):"–"),"Rating 1.0",
       rat==null?"":(rat>=1.10?"good":(rat<0.95?"bad":""))],
+    // Live: updateLiveSwing() rewrites this every frame with the swing so far
+    // in the round being watched. The match average is kept in the tooltip.
     ["v",(spr!=null?(spr>0?"+":"")+spr.toFixed(1)+"%":"–"),"Swing / round",
-      spr==null?"":(spr>=1?"good":(spr<=-1?"bad":""))],
+      spr==null?"":(spr>=1?"good":(spr<=-1?"bad":"")), "swing-tile",
+      sw?`Match average ${spr>0?"+":""}${spr}% per round · `
+        +`gained ${sw.swing_gained_pct}%, lost ${sw.swing_lost_pct}% overall. `
+        +`Our win-probability model, not HLTV's Rating 3.0.`:""],
     ["v",(st.kast!=null?st.kast+"%":"–"),"KAST", st.kast>=70?"good":(st.kast<60?"bad":"")],
     ["v",(st.adr!=null?st.adr:"–"),"ADR", st.adr>=80?"good":(st.adr!=null&&st.adr<60?"bad":"")],
     ["v",`${st.kills??0}/${st.deaths??0}/${st.assists??0}`,"K / D / A"],
@@ -498,7 +517,12 @@ function selectPlayer(name){
     ["v",(st.opening_deaths??0),"Opening deaths", st.opening_deaths>=4?"bad":""],
   ];
   $("#statgrid").innerHTML=cells.map(c=>
-    `<div class="stat"><div class="v ${c[3]||''}">${c[1]}</div><div class="l">${c[2]}</div></div>`).join("");
+    `<div class="stat"${c[4]?` id="${c[4]}"${c[5]?` title="${esc(c[5])}"`:""}`:""}>`
+    + `<div class="v ${c[3]||''}">${c[1]}</div><div class="l">${c[2]}</div></div>`).join("");
+  // The swing tile is rewritten every frame by updateLiveSwing(); reset its
+  // change-detection key so the new player's value paints immediately rather
+  // than after the next thing that happens to move.
+  lastSwingKey="";
 }
 
 // ---- callout labels ----
@@ -671,6 +695,82 @@ function drawUtility(curTick){
     octx.lineTo(p.x-7,p.y); octx.closePath(); octx.fill();
     octx.restore();
   }
+}
+
+// ---- live win probability ----
+// The model lives in parser/swing.py; this only reads the timeline it emits.
+// Points are stored where the value MOVES, so the lookup is a step function -
+// hold the last value until the next point, exactly as the round does.
+function winProbAt(tick, rnd){
+  const wp = ANALYSIS?.win_prob;
+  if(!wp || !wp.length || tick==null) return null;
+  let lo=0, hi=wp.length-1, best=null;
+  if(tick < wp[0][0]) return null;
+  while(lo<=hi){
+    const mid=(lo+hi)>>1;
+    if(wp[mid][0]<=tick){ best=wp[mid]; lo=mid+1; }
+    else hi=mid-1;
+  }
+  // Points only exist for live play, so during freeze time the nearest
+  // preceding point belongs to the PREVIOUS round. Showing it would put last
+  // round's result on screen while this one is still buying.
+  if(!best) return null;
+  if(rnd!=null && best[2]!=null && best[2]!==rnd) return null;
+  return best[1];
+}
+
+// Swing the selected player has accumulated so far in the round being watched.
+// Recomputed from the events rather than stored, so scrubbing backwards gives
+// the value at THAT moment rather than wherever the playhead has been.
+function roundSwingSoFar(name, rnd, tick){
+  const ev = ANALYSIS?.swing_events;
+  if(!ev || !name || rnd==null || tick==null) return null;
+  let net=0, seen=false;
+  for(const e of ev){
+    if(e.r!==rnd || e.t>tick) continue;
+    if(e.a===name && e.a!==e.v){ net+=e.g; seen=true; }
+    if(e.v===name){ net-=e.c; seen=true; }
+  }
+  return seen?net:0;
+}
+
+// The swing tile shows the match total; this rewrites its value in place with
+// the selected player's swing SO FAR in the round being watched, so it moves
+// as you play. The match figure stays available in the tile's tooltip.
+let lastSwingKey="";
+function updateLiveSwing(curTick){
+  const tile=$("#swing-tile");
+  if(!tile) return;
+  const rnd=currentRound();
+  const net=roundSwingSoFar(selected, rnd, curTick);
+  const key=`${selected}|${rnd}|${net==null?"x":net.toFixed(3)}`;
+  if(key===lastSwingKey) return;
+  lastSwingKey=key;
+  const vEl=tile.querySelector(".v"), kEl=tile.querySelector(".l");
+  if(!vEl||!kEl) return;
+  if(net==null){                       // no analysis loaded yet
+    vEl.textContent="–"; kEl.textContent="Swing / round"; return;
+  }
+  const pct=100*net;
+  vEl.textContent=(pct>0?"+":"")+pct.toFixed(1)+"%";
+  vEl.className="v "+(pct>=1?"good":(pct<=-1?"bad":""));
+  kEl.textContent=`Swing · round ${rnd}`;
+}
+
+let lastWpKey="";
+function updateWinProb(curTick){
+  const el=$("#winprob");
+  if(!el) return;
+  const p=winProbAt(curTick, currentRound());
+  if(p==null){ if(lastWpKey!=="none"){ el.style.display="none"; lastWpKey="none"; } return; }
+  const tPct=Math.round(p*100);
+  const key=String(tPct);
+  if(key===lastWpKey) return;         // only touch the DOM when it moves
+  lastWpKey=key;
+  el.style.display="";
+  $("#wp-fill").style.width=tPct+"%";
+  $("#wp-t").textContent=`T ${tPct}%`;
+  $("#wp-ct").textContent=`${100-tPct}% CT`;
 }
 
 // ---- team panels ----
@@ -1120,6 +1220,10 @@ function draw(){
   }
   drawKillfeed(curTick);
   syncVoice(curTick);
+  // Both read the playhead tick, so they belong here with the other
+  // curTick-driven panels rather than up with the per-player drawing.
+  updateWinProb(curTick);
+  updateLiveSwing(curTick);
   drawCoach(curTick);
 }
 

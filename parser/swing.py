@@ -199,12 +199,40 @@ def bomb_planted_at(match, rnd, tick):
     return False
 
 
-def frames_by_round(match):
+def live_windows(match):
+    """
+    (first_tick, last_tick) of actual play for each round.
+
+    A round's `start`..`official_end` also covers freeze time and the
+    post-round period, and during those the demo still reports the PREVIOUS
+    round's bodies - round 5 of the sample match opens 3v5 because nobody has
+    respawned yet. Reading a win probability off that is meaningless, so
+    anything probability-related is clipped to freeze_end..end.
+    """
+    out = {}
+    for r in match.get("rounds") or []:
+        n = r.get("round_num")
+        if n is None:
+            continue
+        start = r.get("freeze_end") or r.get("start")
+        end = r.get("end") or r.get("official_end")
+        if start is not None and end is not None:
+            out[n] = (start, end)
+    return out
+
+
+def frames_by_round(match, live_only=False):
+    windows = live_windows(match) if live_only else {}
     out = defaultdict(list)
     for f in match.get("frames") or []:
         r = f.get("round")
-        if r is not None:
-            out[r].append(f)
+        if r is None:
+            continue
+        if live_only:
+            w = windows.get(r)
+            if w and not (w[0] <= f["tick"] <= w[1]):
+                continue
+        out[r].append(f)
     for r in out:
         out[r].sort(key=lambda f: f["tick"])
     return out
@@ -295,6 +323,41 @@ def compute_swing(match):
     return out
 
 
+def probability_timeline(match, min_delta=0.004):
+    """
+    P(T win) at every sampled frame, for a live readout in the viewer.
+
+    Emitted as [tick, p] pairs rather than one per frame: the probability only
+    moves when somebody dies or the bomb goes down, so most consecutive frames
+    are identical and storing all 4,000 of them is mostly zeros. Points are
+    kept when the value moves by `min_delta`, and always at a round's first and
+    last frame so every round has a defined start and end.
+
+    Computed here rather than ported to JS on purpose. Two implementations of
+    the same model drift, and the one in the browser would be the one nobody
+    tests.
+    """
+    base = side_baseline(match)
+    out = []
+    for rnd, frames in sorted(frames_by_round(match, live_only=True).items()):
+        last = None
+        for i, f in enumerate(frames):
+            planted = bomb_planted_at(match, rnd, f["tick"])
+            at, act, et, ect = state_at(match, f, planted)
+            if at == 0 and act == 0:
+                continue
+            p = win_probability(at, act, planted, et, ect, base)
+            edge = i == 0 or i == len(frames) - 1
+            if last is None or edge or abs(p - last) >= min_delta:
+                # round number rides along so the viewer can tell "no point yet
+                # this round" from "the last point of the previous round" - a
+                # step lookup alone would show round 4's final probability all
+                # through round 5's freeze time.
+                out.append([f["tick"], round(p, 4), rnd])
+                last = p
+    return out
+
+
 def per_player(match, swings=None):
     """Total and per-round swing for each player, as a percentage."""
     swings = compute_swing(match) if swings is None else swings
@@ -346,7 +409,7 @@ def calibrate(match, bins=5):
     assume it.
     """
     base = side_baseline(match)
-    by_round = frames_by_round(match)
+    by_round = frames_by_round(match, live_only=True)
     winners = {r["round_num"]: str(r.get("winner", "")).lower()
                for r in match.get("rounds") or []}
 
