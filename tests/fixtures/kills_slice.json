@@ -1,0 +1,525 @@
+{
+ "_source": "2v5.dem (de_anubis, FACEIT) - rounds 1-5",
+ "_why": "contains a suicide-opener (r3), a null-attacker opener (r5), and the r5 disconnect window",
+ "players": [
+  {
+   "name": "Albyyy-",
+   "steamid": "Albyyy-"
+  },
+  {
+   "name": "Arvend11",
+   "steamid": "Arvend11"
+  },
+  {
+   "name": "Domin0r",
+   "steamid": "Domin0r"
+  },
+  {
+   "name": "Jaybobbyy",
+   "steamid": "Jaybobbyy"
+  },
+  {
+   "name": "RENAT4IK",
+   "steamid": "RENAT4IK"
+  },
+  {
+   "name": "Scooby-woo",
+   "steamid": "Scooby-woo"
+  },
+  {
+   "name": "iTrix_",
+   "steamid": "iTrix_"
+  },
+  {
+   "name": "mrblackstorm",
+   "steamid": "mrblackstorm"
+  },
+  {
+   "name": "pavloven",
+   "steamid": "pavloven"
+  },
+  {
+   "name": "zypex321",
+   "steamid": "zypex321"
+  }
+ ],
+ "rounds": [
+  {
+   "round_num": 1,
+   "start": 3998,
+   "freeze_end": 5694,
+   "end": 8267,
+   "official_end": 8715,
+   "winner": "t",
+   "reason": "ct_killed",
+   "bomb_plant": 7937,
+   "bomb_site": "bombsite_b"
+  },
+  {
+   "round_num": 2,
+   "start": 8715,
+   "freeze_end": 9995,
+   "end": 12924,
+   "official_end": 13372,
+   "winner": "t",
+   "reason": "ct_killed",
+   "bomb_plant": 11647,
+   "bomb_site": "bombsite_b"
+  },
+  {
+   "round_num": 3,
+   "start": 13372,
+   "freeze_end": 18666,
+   "end": 23401,
+   "official_end": 23849,
+   "winner": "t",
+   "reason": "ct_killed",
+   "bomb_plant": 22133,
+   "bomb_site": "bombsite_b"
+  },
+  {
+   "round_num": 4,
+   "start": 23849,
+   "freeze_end": 25129,
+   "end": 29317,
+   "official_end": 29765,
+   "winner": "t",
+   "reason": "ct_killed",
+   "bomb_plant": 28845,
+   "bomb_site": "bombsite_b"
+  },
+  {
+   "round_num": 5,
+   "start": 29765,
+   "freeze_end": 33389,
+   "end": 40721,
+   "official_end": 41169,
+   "winner": "ct",
+   "reason": "t_killed",
+   "bomb_plant": null,
+   "bomb_site": "not_planted"
+  }
+ ],
+ "kills": [
+  {
+   "tick": 6350,
+   "round": 1,
+   "attacker": "RENAT4IK",
+   "victim": "Domin0r",
+   "weapon": "glock",
+   "hs": false,
+   "assister": "zypex321",
+   "flash_assist": false
+  },
+  {
+   "tick": 6802,
+   "round": 1,
+   "attacker": "zypex321",
+   "victim": "pavloven",
+   "weapon": "glock",
+   "hs": true,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 7036,
+   "round": 1,
+   "attacker": "RENAT4IK",
+   "victim": "Jaybobbyy",
+   "weapon": "glock",
+   "hs": true,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 8155,
+   "round": 1,
+   "attacker": "iTrix_",
+   "victim": "Scooby-woo",
+   "weapon": "glock",
+   "hs": true,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 8267,
+   "round": 1,
+   "attacker": "Albyyy-",
+   "victim": "mrblackstorm",
+   "weapon": "usp_silencer",
+   "hs": true,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 11331,
+   "round": 2,
+   "attacker": "Albyyy-",
+   "victim": "Scooby-woo",
+   "weapon": "mac10",
+   "hs": true,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 11816,
+   "round": 2,
+   "attacker": "mrblackstorm",
+   "victim": "Albyyy-",
+   "weapon": "usp_silencer",
+   "hs": false,
+   "assister": "Scooby-woo",
+   "flash_assist": false
+  },
+  {
+   "tick": 12179,
+   "round": 2,
+   "attacker": "pavloven",
+   "victim": "zypex321",
+   "weapon": "fiveseven",
+   "hs": false,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 12318,
+   "round": 2,
+   "attacker": "Arvend11",
+   "victim": "Jaybobbyy",
+   "weapon": "mac10",
+   "hs": false,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 12406,
+   "round": 2,
+   "attacker": "Arvend11",
+   "victim": "Domin0r",
+   "weapon": "mac10",
+   "hs": false,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 12702,
+   "round": 2,
+   "attacker": "RENAT4IK",
+   "victim": "mrblackstorm",
+   "weapon": "mac10",
+   "hs": false,
+   "assister": "Albyyy-",
+   "flash_assist": false
+  },
+  {
+   "tick": 12924,
+   "round": 2,
+   "attacker": "iTrix_",
+   "victim": "pavloven",
+   "weapon": "ak47",
+   "hs": false,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 14094,
+   "round": 3,
+   "attacker": "Arvend11",
+   "victim": "Arvend11",
+   "weapon": "world",
+   "hs": false,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 14101,
+   "round": 3,
+   "attacker": "Albyyy-",
+   "victim": "Albyyy-",
+   "weapon": "world",
+   "hs": false,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 16835,
+   "round": 3,
+   "attacker": null,
+   "victim": null,
+   "weapon": "world",
+   "hs": false,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 17386,
+   "round": 3,
+   "attacker": null,
+   "victim": null,
+   "weapon": "world",
+   "hs": false,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 19765,
+   "round": 3,
+   "attacker": "iTrix_",
+   "victim": "Domin0r",
+   "weapon": "ak47",
+   "hs": true,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 19884,
+   "round": 3,
+   "attacker": "mrblackstorm",
+   "victim": "RENAT4IK",
+   "weapon": "m4a1",
+   "hs": false,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 19897,
+   "round": 3,
+   "attacker": "Arvend11",
+   "victim": "mrblackstorm",
+   "weapon": "mac10",
+   "hs": true,
+   "assister": "Albyyy-",
+   "flash_assist": false
+  },
+  {
+   "tick": 19943,
+   "round": 3,
+   "attacker": "pavloven",
+   "victim": "iTrix_",
+   "weapon": "mp9",
+   "hs": true,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 20273,
+   "round": 3,
+   "attacker": "zypex321",
+   "victim": "Jaybobbyy",
+   "weapon": "galilar",
+   "hs": false,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 22943,
+   "round": 3,
+   "attacker": "zypex321",
+   "victim": "Scooby-woo",
+   "weapon": "m4a1",
+   "hs": true,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 23401,
+   "round": 3,
+   "attacker": "Albyyy-",
+   "victim": "pavloven",
+   "weapon": "ak47",
+   "hs": true,
+   "assister": "iTrix_",
+   "flash_assist": false
+  },
+  {
+   "tick": 27246,
+   "round": 4,
+   "attacker": "mrblackstorm",
+   "victim": "zypex321",
+   "weapon": "deagle",
+   "hs": true,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 27292,
+   "round": 4,
+   "attacker": "Albyyy-",
+   "victim": "mrblackstorm",
+   "weapon": "ak47",
+   "hs": true,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 27412,
+   "round": 4,
+   "attacker": "RENAT4IK",
+   "victim": "Jaybobbyy",
+   "weapon": "ak47",
+   "hs": false,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 27855,
+   "round": 4,
+   "attacker": "Albyyy-",
+   "victim": "pavloven",
+   "weapon": "ak47",
+   "hs": true,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 27992,
+   "round": 4,
+   "attacker": "iTrix_",
+   "victim": "Scooby-woo",
+   "weapon": "ak47",
+   "hs": true,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 28941,
+   "round": 4,
+   "attacker": "Arvend11",
+   "victim": "Arvend11",
+   "weapon": "world",
+   "hs": false,
+   "assister": "Domin0r",
+   "flash_assist": false
+  },
+  {
+   "tick": 28941,
+   "round": 4,
+   "attacker": "Albyyy-",
+   "victim": "Albyyy-",
+   "weapon": "world",
+   "hs": false,
+   "assister": "Scooby-woo",
+   "flash_assist": false
+  },
+  {
+   "tick": 29317,
+   "round": 4,
+   "attacker": "iTrix_",
+   "victim": "Domin0r",
+   "weapon": "ak47",
+   "hs": true,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 30875,
+   "round": 5,
+   "attacker": null,
+   "victim": null,
+   "weapon": "world",
+   "hs": false,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 31023,
+   "round": 5,
+   "attacker": null,
+   "victim": null,
+   "weapon": "world",
+   "hs": false,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 34524,
+   "round": 5,
+   "attacker": "Scooby-woo",
+   "victim": "RENAT4IK",
+   "weapon": "m4a1_silencer",
+   "hs": true,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 35733,
+   "round": 5,
+   "attacker": "Scooby-woo",
+   "victim": "zypex321",
+   "weapon": "m4a1_silencer",
+   "hs": false,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 36904,
+   "round": 5,
+   "attacker": "iTrix_",
+   "victim": "mrblackstorm",
+   "weapon": "ak47",
+   "hs": true,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 37042,
+   "round": 5,
+   "attacker": "Arvend11",
+   "victim": "Domin0r",
+   "weapon": "ak47",
+   "hs": true,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 37067,
+   "round": 5,
+   "attacker": "pavloven",
+   "victim": "Albyyy-",
+   "weapon": "famas",
+   "hs": false,
+   "assister": "Scooby-woo",
+   "flash_assist": false
+  },
+  {
+   "tick": 37123,
+   "round": 5,
+   "attacker": "Arvend11",
+   "victim": "pavloven",
+   "weapon": "ak47",
+   "hs": false,
+   "assister": null,
+   "flash_assist": false
+  },
+  {
+   "tick": 37464,
+   "round": 5,
+   "attacker": "Scooby-woo",
+   "victim": "Arvend11",
+   "weapon": "m4a1_silencer",
+   "hs": false,
+   "assister": "Domin0r",
+   "flash_assist": false
+  },
+  {
+   "tick": 40592,
+   "round": 5,
+   "attacker": "iTrix_",
+   "victim": "Scooby-woo",
+   "weapon": "ak47",
+   "hs": false,
+   "assister": "Albyyy-",
+   "flash_assist": false
+  },
+  {
+   "tick": 40721,
+   "round": 5,
+   "attacker": "Jaybobbyy",
+   "victim": "iTrix_",
+   "weapon": "m4a1_silencer",
+   "hs": false,
+   "assister": "mrblackstorm",
+   "flash_assist": false
+  }
+ ]
+}

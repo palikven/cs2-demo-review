@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overwatch · CS2 Demo Review</title>
+<style>
+  :root{
+    --bg:#0c0f14; --panel:#12161d; --panel-2:#171c25; --line:#232b38;
+    --ink:#e8edf4; --ink-dim:#8b98ab; --ink-faint:#5a6678;
+    --t:#e0a34a;       /* T side  */
+    --ct:#5aa9e6;      /* CT side */
+    --t-dead:#6b5330; --ct-dead:#33566e;
+    --accent:#4ade9b;  /* signature green - actions/alive pulse */
+    --danger:#ff5d5d;
+    --mono:"SFMono-Regular",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--sans)}
+  body{display:grid;grid-template-columns:1fr 320px;grid-template-rows:auto 1fr;height:100vh;overflow:hidden}
+
+  header{
+    grid-column:1/-1;display:flex;align-items:center;gap:20px;
+    padding:12px 20px;background:var(--panel);border-bottom:1px solid var(--line);
+  }
+  .brand{font-family:var(--mono);font-weight:600;letter-spacing:.14em;font-size:13px;text-transform:uppercase}
+  .brand b{color:var(--accent)}
+  .meta{font-family:var(--mono);font-size:12px;color:var(--ink-dim);display:flex;gap:18px}
+  .meta span b{color:var(--ink)}
+  .loadbtn{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--ink-dim);
+    border:1px solid var(--line);background:var(--panel-2);padding:7px 12px;border-radius:6px;cursor:pointer}
+  .loadbtn:hover{border-color:var(--accent);color:var(--ink)}
+
+  /* stage */
+  main{position:relative;display:flex;align-items:center;justify-content:center;padding:16px;min-height:0}
+  #stage{position:relative;background:#070a0e;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  #radar{display:block;image-rendering:auto}
+  #overlay{position:absolute;inset:0}
+
+  /* right rail */
+  aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;padding:16px}
+  .rail-h{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--ink-faint);margin:2px 0 10px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  .roster{display:flex;flex-direction:column;gap:3px;margin-bottom:22px}
+  .prow{display:grid;grid-template-columns:8px 1fr auto;gap:9px;align-items:center;
+    padding:7px 8px;border-radius:6px;font-size:13px;background:var(--panel-2)}
+  .prow .dot{width:8px;height:8px;border-radius:50%}
+  .prow .nm{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .prow .kd{font-family:var(--mono);font-size:12px;color:var(--ink-dim)}
+  .prow.dead{opacity:.4}
+  .prow.dead .nm{text-decoration:line-through}
+  .prow.pov{outline:1px solid var(--accent)}
+
+  .statgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .stat{background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:9px 10px}
+  .stat .v{font-family:var(--mono);font-size:19px;font-weight:600}
+  .stat .l{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);margin-top:2px}
+  .stat .v.good{color:var(--accent)} .stat .v.bad{color:var(--danger)}
+
+  /* transport */
+  .transport{grid-column:1/-1;background:var(--panel);border-top:1px solid var(--line);
+    padding:12px 20px;display:flex;flex-direction:column;gap:10px}
+  .tl-row{display:flex;align-items:center;gap:14px}
+  .btn{font-family:var(--mono);font-size:13px;color:var(--ink);background:var(--panel-2);
+    border:1px solid var(--line);border-radius:6px;padding:7px 14px;cursor:pointer;min-width:44px}
+  .btn:hover{border-color:var(--accent)}
+  .btn.play{background:var(--accent);color:#06120c;border-color:var(--accent);font-weight:700}
+  .rounds{display:flex;gap:4px;flex-wrap:wrap}
+  .rbtn{font-family:var(--mono);font-size:11px;width:26px;height:26px;border-radius:5px;
+    border:1px solid var(--line);background:var(--panel-2);color:var(--ink-dim);cursor:pointer}
+  .rbtn.active{background:var(--accent);color:#06120c;border-color:var(--accent);font-weight:700}
+  .rbtn.t-win{border-bottom:2px solid var(--t)} .rbtn.ct-win{border-bottom:2px solid var(--ct)}
+  .scrub{flex:1;display:flex;align-items:center;gap:12px}
+  input[type=range]{flex:1;accent-color:var(--accent);height:4px}
+  .clock{font-family:var(--mono);font-size:14px;min-width:88px;color:var(--ink-dim)}
+  .clock b{color:var(--ink)}
+  .speed{font-family:var(--mono);font-size:12px;color:var(--ink-dim);cursor:pointer;
+    border:1px solid var(--line);border-radius:5px;padding:6px 9px;background:var(--panel-2)}
+
+  .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:14px;color:var(--ink-dim);font-family:var(--mono);font-size:13px;text-align:center}
+  .empty code{color:var(--accent);background:var(--panel-2);padding:2px 7px;border-radius:4px}
+  input[type=file]{display:none}
+  .legend{display:flex;gap:16px;font-family:var(--mono);font-size:11px;color:var(--ink-faint);align-items:center}
+  .legend i{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:5px;vertical-align:middle}
+</style>
+</head>
+<body>
+  <header>
+    <div class="brand">OVER<b>WATCH</b></div>
+    <div class="meta" id="meta">
+      <span>MAP <b id="m-map">—</b></span>
+      <span>ROUNDS <b id="m-rounds">—</b></span>
+      <span>POV <b id="m-pov">—</b></span>
+    </div>
+    <label class="loadbtn">LOAD MATCH JSON<input type="file" id="file" accept=".json"></label>
+  </header>
+
+  <main>
+    <div id="stage">
+      <canvas id="radar" width="900" height="900"></canvas>
+      <canvas id="overlay" width="900" height="900"></canvas>
+      <div class="empty" id="empty">
+        <div>NO MATCH LOADED</div>
+        <div>run <code>python parser/parse_demo.py your.dem</code>, then load the JSON from <code>data/</code></div>
+      </div>
+    </div>
+  </main>
+
+  <aside>
+    <div class="rail-h">Roster</div>
+    <div class="roster" id="roster"></div>
+    <div class="rail-h">Selected player</div>
+    <div class="statgrid" id="statgrid"></div>
+    <div class="legend" style="margin-top:18px">
+      <span><i style="background:var(--t)"></i>T</span>
+      <span><i style="background:var(--ct)"></i>CT</span>
+      <span><i style="background:var(--danger)"></i>kill</span>
+    </div>
+  </aside>
+
+  <div class="transport">
+    <div class="tl-row">
+      <div class="rounds" id="rounds"></div>
+    </div>
+    <div class="tl-row">
+      <button class="btn play" id="play">▶</button>
+      <div class="scrub">
+        <input type="range" id="seek" min="0" max="0" value="0" step="1">
+        <div class="clock"><b id="c-cur">0</b> / <span id="c-max">0</span></div>
+      </div>
+      <div class="speed" id="speed">1×</div>
+    </div>
+  </div>
+
+<script>
+const CAL_URL = "map_calibration.json";
+let CAL = {};
+let M = null;              // match data
+let frames = [];          // frames for current round
+let allFrames = [];       // all frames
+let idx = 0, playing=false, speed=1, selected=null;
+let radarImg = new Image();
+let radarReady=false, worldToPx=null;
+let killMarks=[];         // {x,y,ttl} on overlay
+
+const $ = s=>document.querySelector(s);
+const radar=$("#radar"), octx=$("#overlay").getContext("2d"), rctx=radar.getContext("2d");
+
+// ---- calibration / coordinate transform ----
+function makeTransform(map){
+  const c = CAL[map];
+  if(!c){ console.warn("no calibration for",map); return null; }
+  const scale = c.scale * 1024;   // radar images are 1024px source
+  const S = radar.width/1024;     // our canvas may differ from 1024
+  return (x,y)=>({
+    x: ((x - c.pos_x)/scale) * radar.width,
+    y: ((c.pos_y - y)/scale) * radar.height
+  });
+}
+
+// ---- load a match object ----
+async function loadMatch(data){
+  M = data;
+  allFrames = data.frames||[];
+  $("#empty").style.display="none";
+  $("#m-map").textContent = data.map||"—";
+  $("#m-rounds").textContent = (data.stats&&data.stats.rounds_played)||data.rounds?.length||"—";
+  $("#m-pov").textContent = data.pov||"—";
+
+  // radar image
+  radarReady=false;
+  radarImg = new Image();
+  radarImg.onload=()=>{radarReady=true; draw();};
+  radarImg.onerror=()=>{radarReady=false; draw();};
+  radarImg.src = `../radars/${data.map}.png`;
+  worldToPx = makeTransform(data.map);
+
+  buildRounds();
+  selectRound(firstRound());
+  buildRoster();
+  selectPlayer(data.pov || (data.players[0]&&data.players[0].name));
+}
+
+function firstRound(){
+  const rs=[...new Set(allFrames.map(f=>frameRound(f)))].filter(r=>r!=null).sort((a,b)=>a-b);
+  return rs.length?rs[0]:null;
+}
+function frameRound(f){
+  // frames don't carry round; infer by kills' tick ranges if needed.
+  // Simpler: we filter by kill rounds using tick windows built in buildRounds().
+  return f._r;
+}
+
+// assign each frame a round using round tick boundaries from kills (best-effort)
+function buildRounds(){
+  const roundsEl=$("#rounds"); roundsEl.innerHTML="";
+  // derive round tick windows from kills
+  const byRound={};
+  (M.kills||[]).forEach(k=>{ if(k.round!=null){ (byRound[k.round]=byRound[k.round]||[]).push(k.tick);}});
+  const rlist=Object.keys(byRound).map(Number).sort((a,b)=>a-b);
+
+  // tag frames: assign to nearest round by tick proximity
+  if(rlist.length){
+    const bounds = rlist.map(r=>({r, minT:Math.min(...byRound[r]), maxT:Math.max(...byRound[r])}));
+    allFrames.forEach(f=>{
+      let best=bounds[0].r, bd=Infinity;
+      bounds.forEach(b=>{
+        const d = f.tick<b.minT?b.minT-f.tick : f.tick>b.maxT?f.tick-b.maxT:0;
+        if(d<bd){bd=d;best=b.r;}
+      });
+      f._r=best;
+    });
+  } else {
+    allFrames.forEach(f=>f._r=1);
+    rlist.push(1);
+  }
+
+  const winners={}; (M.rounds||[]).forEach((r,i)=>{ winners[(r.round_num??i+1)] = (r.winner||"").toString().toUpperCase();});
+  rlist.forEach(r=>{
+    const b=document.createElement("button");
+    b.className="rbtn"+(winners[r]==="T"?" t-win":winners[r]==="CT"?" ct-win":"");
+    b.textContent=r; b.dataset.r=r;
+    b.onclick=()=>selectRound(r);
+    roundsEl.appendChild(b);
+  });
+}
+
+function selectRound(r){
+  if(r==null) return;
+  frames = allFrames.filter(f=>f._r===r);
+  if(!frames.length) frames=allFrames;
+  idx=0; killMarks=[];
+  $("#seek").max = Math.max(0,frames.length-1); $("#seek").value=0;
+  $("#c-max").textContent=frames.length;
+  document.querySelectorAll(".rbtn").forEach(b=>b.classList.toggle("active",+b.dataset.r===r));
+  draw();
+}
+
+// ---- roster + stats ----
+function buildRoster(){
+  const el=$("#roster"); el.innerHTML="";
+  (M.players||[]).forEach(p=>{
+    const st=(M.stats&&M.stats.per_player&&M.stats.per_player[p.name])||{};
+    const row=document.createElement("div");
+    row.className="prow"+(p.name===M.pov?" pov":"");
+    row.dataset.name=p.name;
+    row.innerHTML=`<span class="dot" data-dot></span>
+      <span class="nm">${p.name}</span>
+      <span class="kd">${st.kills??0}–${st.deaths??0}</span>`;
+    row.onclick=()=>selectPlayer(p.name);
+    el.appendChild(row);
+  });
+}
+function selectPlayer(name){
+  selected=name;
+  document.querySelectorAll(".prow").forEach(r=>r.style.background=r.dataset.name===name?"var(--line)":"var(--panel-2)");
+  const st=(M.stats&&M.stats.per_player&&M.stats.per_player[name])||{};
+  const cells=[
+    ["v",`${st.kills??0}/${st.deaths??0}/${st.assists??0}`,"K / D / A"],
+    ["v",(st.kd??0),"K/D"],
+    ["v",(st.hs_pct??0)+"%","HS %", st.hs_pct>=50?"good":""],
+    ["v",(st.entry_win_pct??0)+"%","Entry win", st.entry_win_pct>=50?"good":st.entry_attempts?"bad":""],
+    ["v",(st.opening_deaths??0),"Opening deaths", st.opening_deaths>=4?"bad":""],
+    ["v",(st.flash_assists??0),"Flash assists"],
+  ];
+  $("#statgrid").innerHTML=cells.map(c=>
+    `<div class="stat"><div class="v ${c[3]||''}">${c[1]}</div><div class="l">${c[2]}</div></div>`).join("");
+}
+
+// ---- draw ----
+function draw(){
+  rctx.clearRect(0,0,radar.width,radar.height);
+  if(radarReady){ rctx.drawImage(radarImg,0,0,radar.width,radar.height); }
+  else { rctx.fillStyle="#0b0e13"; rctx.fillRect(0,0,radar.width,radar.height);
+    rctx.fillStyle="#2a3444"; rctx.font="13px monospace"; rctx.textAlign="center";
+    rctx.fillText("radar image missing for "+(M?.map||""), radar.width/2, radar.height/2);}
+  octx.clearRect(0,0,radar.width,radar.height);
+  if(!frames.length||!worldToPx) return;
+  const fr=frames[idx];
+
+  // kill flashes
+  killMarks=killMarks.filter(k=>k.ttl>0);
+  killMarks.forEach(k=>{
+    const p=worldToPx(k.x,k.y);
+    octx.strokeStyle=`rgba(255,93,93,${k.ttl/30})`; octx.lineWidth=2;
+    octx.beginPath(); octx.arc(p.x,p.y,18-(k.ttl/2),0,7); octx.stroke();
+    k.ttl--;
+  });
+
+  (fr.players||[]).forEach(pl=>{
+    const p=worldToPx(pl.x,pl.y);
+    const isT=(pl.t||"").toString().toUpperCase().startsWith("T");
+    const alive=pl.a!==false && (pl.hp==null||pl.hp>0);
+    const col = alive ? (isT?getCSS('--t'):getCSS('--ct')) : (isT?getCSS('--t-dead'):getCSS('--ct-dead'));
+
+    // view cone
+    if(alive && pl.yaw!=null){
+      const a=-pl.yaw*Math.PI/180;
+      octx.fillStyle=isT?"rgba(224,163,74,.16)":"rgba(90,169,230,.16)";
+      octx.beginPath(); octx.moveTo(p.x,p.y);
+      octx.arc(p.x,p.y,26,a-0.5,a+0.5); octx.closePath(); octx.fill();
+    }
+    // body
+    octx.beginPath(); octx.arc(p.x,p.y,alive?6:4,0,7);
+    octx.fillStyle=col; octx.fill();
+    if(pl.name===selected||pl.n===selected){octx.strokeStyle=getCSS('--accent');octx.lineWidth=2;octx.stroke();}
+    // name for selected/pov
+    if(pl.n===selected){
+      octx.fillStyle=getCSS('--ink'); octx.font="11px monospace"; octx.textAlign="center";
+      octx.fillText(pl.n,p.x,p.y-11);
+    }
+  });
+
+  // roster alive/dead sync
+  document.querySelectorAll(".prow").forEach(r=>{
+    const pl=(fr.players||[]).find(x=>x.n===r.dataset.name);
+    const alive=pl&&pl.a!==false&&(pl.hp==null||pl.hp>0);
+    r.classList.toggle("dead",pl&&!alive);
+    const dot=r.querySelector("[data-dot]");
+    if(pl){const isT=(pl.t||"").toUpperCase().startsWith("T");
+      dot.style.background=isT?getCSS('--t'):getCSS('--ct');}
+  });
+
+  // clock
+  $("#c-cur").textContent=idx;
+  $("#seek").value=idx;
+
+  // fire any kills at this tick
+  (M.kills||[]).forEach(k=>{
+    if(k._fired) return;
+    if(fr.tick!=null && Math.abs((k.tick||0)-fr.tick) < (M.sample_every||32)){
+      if(k.vx!=null){killMarks.push({x:k.vx,y:k.vy,ttl:30});}
+      k._fired=true;
+    }
+  });
+}
+function getCSS(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim();}
+
+// ---- playback loop ----
+let last=0;
+function tick(ts){
+  if(document.hidden){requestAnimationFrame(tick);return;}
+  if(playing && frames.length){
+    if(ts-last > 500/speed){    // frames are ~0.5s of gametime
+      idx++; if(idx>=frames.length){idx=frames.length-1;playing=false;$("#play").textContent="▶";}
+      (M.kills||[]).forEach(k=>k._fired=false); // allow re-fire on scrub
+      draw(); last=ts;
+    }
+  }
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+// ---- controls ----
+$("#play").onclick=()=>{playing=!playing;$("#play").textContent=playing?"❚❚":"▶";
+  if(idx>=frames.length-1)idx=0;};
+$("#seek").oninput=e=>{idx=+e.target.value;(M.kills||[]).forEach(k=>k._fired=false);draw();};
+$("#speed").onclick=()=>{speed=speed>=4?0.5:speed*2;$("#speed").textContent=speed+"×";};
+document.addEventListener("keydown",e=>{
+  if(e.code==="Space"){e.preventDefault();$("#play").click();}
+  if(e.code==="ArrowRight"){idx=Math.min(frames.length-1,idx+1);draw();}
+  if(e.code==="ArrowLeft"){idx=Math.max(0,idx-1);draw();}
+});
+$("#file").onchange=e=>{
+  const f=e.target.files[0]; if(!f)return;
+  const rd=new FileReader();
+  rd.onload=()=>{try{loadMatch(JSON.parse(rd.result));}catch(err){alert("Bad JSON: "+err.message);}};
+  rd.readAsText(f);
+};
+
+// ---- boot: load calibration, then sample if present ----
+fetch(CAL_URL).then(r=>r.json()).then(c=>{CAL=c;
+  // try auto-loading the sample for convenience
+  fetch("../data/_sample_mirage.json").then(r=>r.ok?r.json():null).then(d=>{if(d)loadMatch(d);}).catch(()=>{});
+}).catch(()=>{ $("#empty").innerHTML="<div>map_calibration.json failed to load</div>";});
+</script>
+</body>
+</html>

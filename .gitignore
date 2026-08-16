@@ -1,0 +1,12 @@
+﻿# Valve's artwork, extracted from the local CS2 install by tools/extract_icons.py.
+# Each user should run that script against their own game install.
+viewer/icons/
+
+# demos are hundreds of MB - never commit them
+*.dem
+
+# parser output + caches
+data/*.json
+!data/_sample_mirage.json
+__pycache__/
+.pytest_cache/
