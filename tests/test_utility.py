@@ -203,3 +203,39 @@ class TestBomb:
         for b in real_match["bomb"]:
             if b["event"] == "plant":
                 assert b.get("site")
+
+    def test_a_plant_often_has_no_defuse_or_detonate(self, real_match):
+        """
+        Pins the data fact behind a real rendering bug.
+
+        If every CT dies after the plant the round is already decided, and the
+        demo never records the bomb going off - so the plant has no resolution
+        event at all. In the full match only 4 of 13 plants have one.
+
+        Anything deciding how long to show a planted bomb must therefore fall
+        back to the round's end rather than keying on defuse/detonate. Doing
+        the latter left every unresolved plant on the map for the rest of the
+        match: by the last round the viewer was drawing nine bombs at once.
+        """
+        plants = [b for b in real_match["bomb"] if b["event"] == "plant"]
+        resolved_rounds = {b["r"] for b in real_match["bomb"]
+                           if b["event"] in ("defuse", "detonate")}
+        unresolved = [p for p in plants if p["r"] not in resolved_rounds]
+        assert plants, "no plants in this slice"
+        assert unresolved, ("every plant here resolves, so this fixture can no "
+                            "longer guard the round-end fallback - re-cut it "
+                            "from a match that has an unresolved plant")
+
+    def test_every_plant_belongs_to_a_known_round(self, real_match):
+        """The round-end fallback needs a round to look up."""
+        rounds = {r["round_num"] for r in real_match["rounds"]}
+        for b in real_match["bomb"]:
+            assert b.get("r") in rounds, f"{b['event']} at {b['t']} has round {b.get('r')}"
+
+    def test_plants_land_inside_their_round(self, real_match):
+        by_round = {r["round_num"]: r for r in real_match["rounds"]}
+        for b in real_match["bomb"]:
+            rr = by_round[b["r"]]
+            end = rr.get("official_end") or rr.get("end")
+            assert rr["start"] <= b["t"] <= end, \
+                f"{b['event']} at {b['t']} is outside round {b['r']}"

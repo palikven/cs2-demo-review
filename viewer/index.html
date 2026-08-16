@@ -617,10 +617,22 @@ function drawUtility(curTick){
     }
   }
 
-  // planted bomb stays put until it goes off or is defused
+  // Planted bomb: on the map from the plant until it is defused, detonates,
+  // or the round ends - whichever comes first.
+  //
+  // That last clause is load-bearing. Only 4 of the 13 plants in a real match
+  // have a defuse or detonate event at all: if every CT dies after the plant
+  // the round is already decided and the demo never records the bomb going
+  // off. Keying only on those events left every unresolved plant on the map
+  // for the rest of the match, so by the last round you were looking at nine
+  // bombs at once.
   for(const b of BOMB||[]){
     if(b.event!=="plant") continue;
-    const done=(BOMB.find(x=>x.r===b.r&&(x.event==="defuse"||x.event==="detonate"))||{}).t;
+    const rr=(M.rounds||[]).find(x=>x.round_num===b.r);
+    const roundEnd=rr ? (rr.official_end ?? rr.end) : null;
+    const resolved=(BOMB.find(x=>x.r===b.r&&(x.event==="defuse"||x.event==="detonate"))||{}).t;
+    const done = resolved!=null && roundEnd!=null ? Math.min(resolved,roundEnd)
+               : (resolved!=null ? resolved : roundEnd);
     if(curTick<b.t || (done!=null && curTick>done)) continue;
     const p=worldToPx(b.x,b.y);
     const blink=0.55+0.45*Math.sin(curTick/rate*6);
