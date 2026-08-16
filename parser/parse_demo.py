@@ -8,7 +8,7 @@ Usage:
     python parse_demo.py path/to/match.dem --pov "YourFaceitName"
 
 Output:
-    data/<demo_name>.json   (positions + events + per-round + stats)
+    data/<demo_name>.json   (positions + callouts + events + per-round + stats)
 
 Design notes
 ------------
@@ -16,7 +16,9 @@ Design notes
   stays small enough to load in a browser. Playback interpolates between samples.
 - Stats are DETERMINISTIC. The AI layer (stage 3) only ever narrates these
   numbers; it never sees raw coordinates. That's deliberate - it's the only way
-  to stop an LLM inventing tactical nonsense.
+  to stop an LLM inventing tactical nonsense. Callout NAMES are the one
+  positional thing it does see, and only because Valve assigned them - "Palace"
+  is a fact from the demo, not a coordinate the model has to interpret.
 - Written defensively: FACEIT demos occasionally name columns slightly
   differently from HLTV pro demos, so we resolve column names at runtime and
   fail loud with a clear message rather than a cryptic KeyError.
@@ -24,6 +26,7 @@ Design notes
 
 import argparse
 import json
+import statistics
 import sys
 from pathlib import Path
 
@@ -34,6 +37,23 @@ from awpy import Demo
 SAMPLE_EVERY_TICKS = 32
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
+
+# awpy always parses ["last_place_name","X","Y","Z","health","team_name"] and
+# nothing else unless you ask. Everything below is in awpy's DEFAULT_PLAYER_PROPS
+# but only applies if passed explicitly - without it the viewer's view cones are
+# dead code, because no demo we parse carries yaw.
+#
+# Deliberately NOT requested: active_weapon. It parses fine but the value is a
+# numeric entity id (1392828.0), not a weapon name - useless without a lookup
+# table we don't have. `inventory` carries real weapon names instead; we keep it
+# off the frames (a list per player per tick would dwarf the rest of the file)
+# and read it only on kill events.
+EXTRA_PLAYER_PROPS = ["yaw", "pitch", "armor_value", "inventory",
+                      "flash_duration", "is_alive"]
+
+# A callout label drawn from fewer samples than this is somebody clipping a
+# corner, not a place anyone played. Drawing it just litters the radar.
+MIN_PLACE_SAMPLES = 20
 
 
 # --------------------------------------------------------------------------
@@ -58,13 +78,28 @@ def num(v, default=0):
     return default if v is None else v
 
 
+def clean_place(v):
+    """
+    Normalise a callout name, or None if the demo doesn't have one here.
+
+    Valve emits an empty string - not null - for a nav area with no place name
+    assigned, so a plain `is not None` check lets "" through and you end up with
+    a nameless entry in place_names and a label drawn at the median of every
+    unnamed corner on the map.
+    """
+    if v is None:
+        return None
+    s = str(v).strip()
+    return s or None
+
+
 # --------------------------------------------------------------------------
 # main parse
 # --------------------------------------------------------------------------
 def parse(demo_path: Path, pov_name: str | None):
     print(f"[*] Parsing {demo_path.name} ...")
     dem = Demo(str(demo_path), verbose=False)
-    dem.parse()
+    dem.parse(player_props=EXTRA_PLAYER_PROPS)
 
     header = dem.header or {}
     map_name = header.get("map_name") or header.get("map") or "unknown"
@@ -90,6 +125,11 @@ def parse(demo_path: Path, pov_name: str | None):
         "team": first_present(ticks_df, ["team_name", "team_num", "team", "side"]),
         "round": first_present(ticks_df, ["round_num", "round", "total_rounds_played"]),
         "alive": first_present(ticks_df, ["is_alive", "alive"]),
+        # Valve's own callout name for the nav area a player is standing in.
+        # awpy parses last_place_name on every tick whether you ask or not and
+        # renames it to `place` (parsers/utils.py fix_common_names). We used to
+        # select it into `keep` and then never write it out.
+        "place": first_present(ticks_df, ["place", "last_place_name"]),
     }
     missing = [k for k in ("tick", "name", "x", "y") if cols[k] is None]
     if missing:
@@ -119,13 +159,21 @@ def parse(demo_path: Path, pov_name: str | None):
 
     # per-tick frame rows
     keep = [cols["tick"], cols["name"], cols["x"], cols["y"]]
-    for opt in ("z", "yaw", "health", "team", "round", "alive"):
+    for opt in ("z", "yaw", "health", "team", "round", "alive", "place"):
         if cols[opt]:
             keep.append(cols[opt])
     frame_rows = sampled.select(keep).sort(cols["tick"]).to_dicts()
 
+    # Callout names repeat across ~40k position samples, so store each one once
+    # in place_names[] and reference it by index. Interning costs a dict lookup
+    # per row and saves roughly a third of the frame payload.
+    place_names = []
+    place_index = {}
+    place_points = {}       # index -> ([x...], [y...]) for the label centroids
+
     # group into { tick: [ {player}, ... ] }
     frames = {}
+    frame_round = {}        # tick -> round_num, shared by every player at that tick
     skipped_null = 0
     for r in frame_rows:
         t = r[cols["tick"]]
@@ -150,12 +198,53 @@ def parse(demo_path: Path, pov_name: str | None):
             entry["t"] = str(r[cols["team"]])
         if cols["alive"] and r.get(cols["alive"]) is not None:
             entry["a"] = bool(r[cols["alive"]])
+        if cols["z"] and r.get(cols["z"]) is not None:
+            entry["z"] = round(float(r[cols["z"]]), 1)
+        if cols["place"]:
+            place = clean_place(r.get(cols["place"]))
+            if place is not None:
+                idx = place_index.get(place)
+                if idx is None:
+                    idx = len(place_names)
+                    place_index[place] = idx
+                    place_names.append(place)
+                    place_points[idx] = ([], [])
+                entry["pl"] = idx
+                place_points[idx][0].append(entry["x"])
+                place_points[idx][1].append(entry["y"])
+        # Round number is a property of the tick, not of each player standing on
+        # it, so it goes on the frame rather than being repeated ten times.
+        if cols["round"] and r.get(cols["round"]) is not None:
+            frame_round[t] = int(num(r[cols["round"]]))
         frames.setdefault(t, []).append(entry)
 
-    frame_list = [{"tick": t, "players": p} for t, p in sorted(frames.items())]
+    frame_list = []
+    for t, p in sorted(frames.items()):
+        fr = {"tick": t, "players": p}
+        if t in frame_round:
+            fr["round"] = frame_round[t]
+        frame_list.append(fr)
     if skipped_null:
         print(f"[*] Skipped {skipped_null:,} sampled rows with no position "
               f"(disconnected / unspawned players)")
+
+    # ---- callout label positions ----
+    # The label for "Palace" goes at the MEDIAN of every position sample taken
+    # there, not the mean. Callout regions are routinely L-shaped or wrap a
+    # corner, and the mean of an L lands in the wall between its arms; the
+    # median stays on a spot somebody actually stood.
+    places = {}
+    for idx, (xs, ys) in place_points.items():
+        if len(xs) < MIN_PLACE_SAMPLES:
+            continue
+        places[place_names[idx]] = {
+            "x": round(statistics.median(xs), 1),
+            "y": round(statistics.median(ys), 1),
+            "n": len(xs),
+        }
+    if place_names:
+        print(f"[*] {len(place_names)} callouts seen, {len(places)} with "
+              f">={MIN_PLACE_SAMPLES} samples to label")
 
     # ---- rounds ----
     round_rows = to_dicts(rounds_df)
@@ -177,6 +266,21 @@ def parse(demo_path: Path, pov_name: str | None):
         "ay": first_present(kills_df, ["attacker_Y", "attacker_y"]),
         "vx": first_present(kills_df, ["victim_X", "victim_x", "user_X"]),
         "vy": first_present(kills_df, ["victim_Y", "victim_y", "user_Y"]),
+        "az": first_present(kills_df, ["attacker_Z", "attacker_z"]),
+        "vz": first_present(kills_df, ["victim_Z", "victim_z", "user_Z"]),
+        # The whole point of the coaching layer: which callout each side of the
+        # duel was standing in. awpy prefixes the tick-level `place` onto kills.
+        "aplace": first_present(kills_df, ["attacker_place", "attacker_last_place_name"]),
+        "vplace": first_present(kills_df, ["victim_place", "victim_last_place_name"]),
+        # Engagement context awpy computes for free and we were ignoring.
+        "dist": first_present(kills_df, ["distance"]),
+        "blind": first_present(kills_df, ["attackerblind"]),
+        "smoke": first_present(kills_df, ["thrusmoke"]),
+        "air": first_present(kills_df, ["attackerinair"]),
+        "noscope": first_present(kills_df, ["noscope"]),
+        "wallbang": first_present(kills_df, ["penetrated"]),
+        "ainv": first_present(kills_df, ["attacker_inventory"]),
+        "vinv": first_present(kills_df, ["victim_inventory"]),
     }
     for r in to_dicts(kills_df):
         ev = {
@@ -199,6 +303,37 @@ def parse(demo_path: Path, pov_name: str | None):
         if kcols["vx"] and r.get(kcols["vx"]) is not None:
             ev["vx"] = round(float(r[kcols["vx"]]), 1)
             ev["vy"] = round(float(r[kcols["vy"]]), 1)
+        if kcols["az"] and r.get(kcols["az"]) is not None:
+            ev["az"] = round(float(r[kcols["az"]]), 1)
+        if kcols["vz"] and r.get(kcols["vz"]) is not None:
+            ev["vz"] = round(float(r[kcols["vz"]]), 1)
+
+        # Places are the coaching layer's whole vocabulary - emit them only when
+        # actually named, so downstream code can treat absence as "unknown"
+        # rather than having to special-case an empty string.
+        aplace = clean_place(r.get(kcols["aplace"])) if kcols["aplace"] else None
+        vplace = clean_place(r.get(kcols["vplace"])) if kcols["vplace"] else None
+        if aplace:
+            ev["attacker_place"] = aplace
+        if vplace:
+            ev["victim_place"] = vplace
+
+        if kcols["dist"] and r.get(kcols["dist"]) is not None:
+            ev["dist"] = round(float(r[kcols["dist"]]), 1)
+        for key, col in (("blind", "blind"), ("smoke", "smoke"),
+                         ("air", "air"), ("noscope", "noscope")):
+            if kcols[col] and r.get(kcols[col]) is not None:
+                if bool(r[kcols[col]]):
+                    ev[key] = True
+        if kcols["wallbang"] and num(r.get(kcols["wallbang"]), 0):
+            ev["wallbang"] = True
+        # What each side was holding. Only on kills (159 rows), never on frames -
+        # an inventory list per player per tick would be larger than the rest of
+        # the file put together.
+        if kcols["ainv"] and r.get(kcols["ainv"]) is not None:
+            ev["attacker_inv"] = [str(w) for w in r[kcols["ainv"]]]
+        if kcols["vinv"] and r.get(kcols["vinv"]) is not None:
+            ev["victim_inv"] = [str(w) for w in r[kcols["vinv"]]]
         kill_events.append(ev)
 
     # ---- damage rows (for ADR) ----
@@ -238,6 +373,10 @@ def parse(demo_path: Path, pov_name: str | None):
         "rounds": round_rows,
         "kills": kill_events,
         "frames": frame_list,
+        # place_names is the lookup table for the per-frame `pl` index; places
+        # is the derived label position for each callout the viewer can draw.
+        "place_names": place_names,
+        "places": places,
         "stats": stats,
         "pov": pov_name,
     }
