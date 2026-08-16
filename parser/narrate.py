@@ -20,7 +20,10 @@ import os
 import sys
 from pathlib import Path
 
-MODEL = "claude-sonnet-4-6"   # good balance of quality/cost for this
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from gates import reliable  # noqa: E402
+
+MODEL = "claude-opus-5"
 
 
 def build_facts(match):
@@ -48,7 +51,7 @@ def build_facts(match):
     total_kills = sum(st.get("kills", 0) for st in per.values())
     flashers = sum(1 for st in per.values() if st.get("flash_assists"))
     total_flash = sum(st.get("flash_assists", 0) for st in per.values())
-    flash_reliable = flashers >= 2 and total_flash >= max(3, 0.03 * total_kills)
+    flash_reliable = reliable(total_flash, total_kills, sources=flashers)
 
     for name, st in per.items():
         parts = [

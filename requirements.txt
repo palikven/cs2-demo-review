@@ -1,2 +1,14 @@
 awpy>=2.0
-anthropic>=0.40
+
+# parse_demo.py imports polars directly. It has always arrived transitively via
+# awpy, which works right up until awpy changes its own dependencies.
+polars>=1.0
+
+# coach.py needs messages.parse() with output_format=, adaptive thinking, and
+# output_config.effort - none of which exist in the old >=0.40 floor. Verified
+# against 0.121.0.
+anthropic>=0.121
+
+# Structured outputs are declared as pydantic models. It ships with anthropic
+# today; named here because coach.py imports it directly.
+pydantic>=2.0

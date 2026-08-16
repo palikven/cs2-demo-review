@@ -28,6 +28,7 @@ from pathlib import Path
 
 # parse_demo isn't a package, and analyze.py sits next to it.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from gates import reliable  # noqa: E402,F401  (re-exported for callers)
 from parse_demo import TRADE_WINDOW_TICKS, is_player_kill, is_trade  # noqa: E402
 
 # A teammate further than this from you when you died was not going to trade
@@ -69,21 +70,6 @@ def dist2d(ax, ay, bx, by):
     height into the distance would make the pair look closer than they play.
     """
     return math.hypot(ax - bx, ay - by)
-
-
-def reliable(observed, total, min_count=3, min_frac=0.03, min_sources=2, sources=1):
-    """
-    Is a signal strong enough to say out loud?
-
-    Lifted from narrate.py's flash-assist gate, which exists because the parser
-    cannot tell "nobody did this" from "this demo did not record it" - and a
-    zero reads as a finding, so the model confidently diagnoses a problem that
-    is really a parsing gap. The same trap applies to callouts: one death in
-    Palace is where you happened to die, not a habit worth a paragraph.
-    """
-    if sources < min_sources:
-        return False
-    return observed >= max(min_count, min_frac * total)
 
 
 class MatchIndex:
