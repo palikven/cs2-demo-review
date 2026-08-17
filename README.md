@@ -18,13 +18,15 @@ cs2coach/
     narrate.py        # stats    -> plain-language team review              (Claude)
     gates.py          # "is this signal strong enough to say out loud?"
   server/
-    app.py            # serves the viewer + the live "ask about this moment" endpoint
+    app.py            # serves the viewer; routes /api/chat and /api/ask
+    chat.py           # what the coach is told - context assembly for the chat
+    providers/        # one file per LLM vendor; anthropic.py is the only one
   viewer/
-    index.html        # the 2D viewer (callouts, killfeed, coach panel)
+    index.html        # the 2D viewer (callouts, killfeed, coach panel, chat)
     map_calibration.json
   radars/             # radar images for the Active Duty maps
   data/               # parsed match JSONs land here
-  tests/              # 135 tests
+  tests/              # 321 tests
 ```
 
 ## One-time setup
@@ -106,13 +108,61 @@ set ANTHROPIC_API_KEY=sk-ant-...
 python parser/coach.py data/match.json    # per-death verdicts -> match_coach.json
 python parser/narrate.py data/match.json  # team-level review  -> match_notes.md
 ```
-With the key set, `server/app.py` also enables the **ask box**: pause anywhere
-and ask "should I peek here?" — answered from the state of that exact tick.
-
 Want to see what the model gets without spending anything?
 ```bash
 python parser/coach.py data/match.json --facts-only
 ```
+
+## Talking to the coach
+
+Press **K** in the viewer (or the *Coach chat* button in the header). It's a
+conversation, not a one-shot box: ask *"what did I do wrong here, that my swing
+and rating went down?"*, then *"and the round before?"* without restating
+anything.
+
+Each turn is stamped with the round and tick you asked it at, because the answer
+is only true for that moment. Move the playhead and ask again and the coach is
+looking at the new one.
+
+**Bring your own key.** If the server has no `ANTHROPIC_API_KEY`, the panel asks
+for one. It's kept in your browser's `localStorage` and sent only to your own
+localhost server, which makes the provider call — provider SDKs stay server-side
+and the key never goes anywhere else. If both a browser key and a server key
+exist, the browser one wins, so you're billed on the key you connected rather
+than silently spending whatever the machine had set.
+
+> `localStorage` is readable by any script on the page. That's fine for a tool
+> you run on your own machine. It would **not** be fine if you ever host this —
+> if you do, move key handling server-side first.
+
+Model picker is Opus 5 / Sonnet 5 / Haiku 4.5. It's your money once you've
+connected a key, so the cheap one is one click away.
+
+### What the coach is told
+
+Two blocks, and the order is load-bearing:
+
+| | contents | cached |
+|---|---|---|
+| **stable** | system prompt, your rating / KAST / ADR / swing, every death with the callout you died in and the one you were killed from, hotspots, spacing, the team scoreboard, round-by-round results | **yes** |
+| **volatile** | the tick you're paused at, then the conversation, then the question |  no |
+
+Caching is a prefix match, so stable content has to come first and be
+byte-identical across turns — the brief is built once per match and reused. It's
+~1,075 tokens on a real match, over the 512 minimum, so every follow-up reads it
+back at roughly a tenth of the price instead of paying for it again.
+
+The enemy-blindness rule below applies here too, and is the reason the answers
+are worth anything: the coach gets what *you* knew at that tick, plus what the
+demo proves happened afterwards. Never live enemy positions.
+
+**Roles are designed for, not built.** A later version will ask whether a demo
+was a FACEIT pug or a team match and let you assign IGL / AWPer / Entry /
+Support / Anchor with the positions each played. The plumbing is in place —
+`role` rides through the request and into the prompt via a `ROLE_GUIDANCE` dict
+in `server/chat.py` that ships empty on purpose. What actually differs in the
+advice per role needs its own design pass; guessing now would bake in the wrong
+answer.
 
 ## The one design rule that matters
 
@@ -227,6 +277,18 @@ Two bugs were found that way and not by review: a liveness test whose fixture
 set `hp=0` and `a=false` together (so either check alone satisfied it), and a
 snapshot guard that stripped enemy positions from records that were never
 returned in the first place.
+
+The chat tests went the same way, and two of them passed against deliberately
+broken code before they were fixed: one asserted the brief was *identical*
+across turns, which a rebuilt-from-scratch brief also satisfies (the memo it was
+meant to protect could be deleted with the test still green), and one built an
+even-length history so the "never start on an assistant turn" slice never
+actually landed on one.
+
+The success path against a real API is the one thing not covered — there's no
+key in this environment. Everything up to the SDK boundary is, and the
+hand-written SSE parser is tested against events split across chunks, batched
+into one, malformed, and truncated mid-stream.
 
 ## Maps included
 
