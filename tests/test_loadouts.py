@@ -156,3 +156,65 @@ class TestArmorAndKit:
             for p in f["players"]:
                 if p.get("eq") in carriers:
                     assert p.get("t") == "t", f"{p['n']} is {p.get('t')} with the bomb"
+
+
+class TestDamageEvents:
+    """
+    The viewer replays these to show a running ADR, so they have to reproduce
+    the parser's own number exactly - otherwise the panel drifts from the
+    match total as you scrub toward the end.
+    """
+
+    def test_damages_are_exported_with_ticks(self, real_match):
+        dmg = real_match.get("damages")
+        assert dmg, "no damage events exported"
+        for d in dmg:
+            assert d["t"] is not None and d["a"] and d["d"] >= 0
+
+    def test_replaying_them_reproduces_adr(self, real_match, stats_mod, kcols):
+        """
+        Feed compute_stats the exported events and its ADR must equal what you
+        get by simply summing them. That property is exactly what the viewer
+        relies on when it replays damage up to the playhead, so if it ever
+        stops holding, the live ADR silently drifts from the match total.
+        """
+        from collections import defaultdict
+        dmg = [{"attacker": d["a"], "victim": d["v"], "dmg": d["d"],
+                "attacker_side": None, "victim_side": None}
+               for d in real_match["damages"]]
+        stats = stats_mod.compute_stats(
+            real_match["kills"], real_match["rounds"], real_match["players"],
+            None, kcols, damages=dmg)
+        rounds = stats["rounds_played"]
+        total = defaultdict(int)
+        for d in real_match["damages"]:
+            total[d["a"]] += d["d"]
+        checked = 0
+        for name, s in stats["per_player"].items():
+            if s.get("adr") is None:
+                continue
+            checked += 1
+            assert s["adr"] == pytest.approx(round(total[name] / rounds, 1), abs=0.05), \
+                f"{name}: parser {s['adr']} vs replayed {total[name] / rounds:.1f}"
+        assert checked, "no player had ADR computed"
+
+    def test_self_damage_is_excluded(self, real_match):
+        """Falling off a ledge must not pad your own ADR."""
+        for d in real_match["damages"]:
+            assert d["a"] != d["v"]
+
+    def test_team_damage_is_excluded(self, real_match):
+        """
+        Pre-filtered at export so the viewer does not have to re-implement the
+        rule and get it subtly different from compute_stats.
+        """
+        sides = {}
+        for f in real_match["frames"]:
+            for p in f["players"]:
+                if p.get("t"):
+                    sides.setdefault(p["n"], set()).add(p["t"])
+        for d in real_match["damages"]:
+            a, v = sides.get(d["a"]), sides.get(d["v"])
+            # a player who only ever held one side across the slice
+            if a and v and len(a) == 1 and len(v) == 1 and a == v:
+                raise AssertionError(f"team damage kept: {d}")

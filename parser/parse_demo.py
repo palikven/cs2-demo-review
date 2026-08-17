@@ -590,6 +590,8 @@ def parse(demo_path: Path, pov_name: str | None):
         # dmg_health_real is capped at the victim's remaining HP; dmg_health is
         # the raw roll and over-counts on the killing blow. ADR wants the capped one.
         "dmg": first_present(damages_df, ["dmg_health_real", "dmg_health", "damage"]) if damages_df is not None else None,
+        "tick": first_present(damages_df, ["tick"]) if damages_df is not None else None,
+        "round": first_present(damages_df, ["round_num", "round"]) if damages_df is not None else None,
     }
     damage_rows = []
     if damages_df is not None and dcols["dmg"]:
@@ -600,6 +602,8 @@ def parse(demo_path: Path, pov_name: str | None):
                 "attacker_side": r.get(dcols["aside"]) if dcols["aside"] else None,
                 "victim_side": r.get(dcols["vside"]) if dcols["vside"] else None,
                 "dmg": num(r.get(dcols["dmg"]), 0),
+                "tick": r.get(dcols["tick"]) if dcols["tick"] else None,
+                "round": r.get(dcols["round"]) if dcols["round"] else None,
             })
         print(f"[*] {len(damage_rows):,} damage events -> ADR")
     else:
@@ -637,6 +641,19 @@ def parse(demo_path: Path, pov_name: str | None):
                          "full_buy": FULL_BUY_VALUE},
         "utility": utility,
         "bomb": bomb_events,
+        # Damage that counts toward ADR, with ticks, so the viewer can show a
+        # running ADR instead of only the match total. Pre-filtered by the same
+        # rules compute_stats uses (no self-damage, no team damage) so the two
+        # cannot disagree about what counts.
+        "damages": [
+            {"t": d["tick"], "r": d.get("round"), "a": d["attacker"],
+             "v": d["victim"], "d": int(num(d["dmg"], 0))}
+            for d in damage_rows
+            if d.get("tick") is not None and d.get("attacker")
+            and d["attacker"] != d.get("victim")
+            and not (d.get("attacker_side") and d.get("victim_side")
+                     and d["attacker_side"] == d["victim_side"])
+        ],
         "stats": stats,
         "pov": pov_name,
     }

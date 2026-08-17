@@ -374,6 +374,10 @@ async function loadMatch(data){
   ANALYSIS = null; COACH = null; coachKey = null;
   MATCH_NAME = data._name || null;
   if(data._name) loadSidecars(data._name);
+  // ?verify runs the live-stats cross-check against the parser's own totals
+  // and logs the result. Cheap, and the only thing standing between the two
+  // implementations of the rating maths and a silent drift.
+  if(new URLSearchParams(location.search).has("verify")) verifyLiveStats();
 
   buildRounds();
   selectRound(firstRound());
@@ -490,7 +494,15 @@ function buildRoster(){ teamsKey=""; }
 function selectPlayer(name){
   selected=name; dirty=true;
   document.querySelectorAll(".prow").forEach(r=>r.classList.toggle("pov",r.dataset.name===name));
-  const st=(M.stats&&M.stats.per_player&&M.stats.per_player[name])||{};
+  renderStatGrid(name);
+  lastStatsKey="";          // force the live pass to repaint for the new player
+}
+
+// Split out so the live updater can rebuild the grid as the playhead moves.
+// `st` is the match total by default and the as-of-now figures during
+// playback; the tiles are identical either way, which is the point.
+function renderStatGrid(name, live){
+  const st = live || (M.stats&&M.stats.per_player&&M.stats.per_player[name]) || {};
   // 1.00 is the league-average player, so colouring either side of it is the
   // whole point of the metric.
   const rat = st.rating;
@@ -697,6 +709,168 @@ function drawUtility(curTick){
   }
 }
 
+// ---- live stats ----
+// Every panel figure recomputed from the events up to the playhead, so the
+// numbers are what the scoreboard said AT THAT MOMENT rather than at the end.
+//
+// This duplicates compute_stats() in parse_demo.py, which is a real risk: two
+// implementations of the same formula drift. It is pinned by checking that at
+// the match's final tick this agrees with Python's totals exactly, for every
+// player and every field - see verifyLiveStats() below, which the console runs
+// on load when ?verify is in the URL.
+const HLTV_AVG_KPR = 0.679, HLTV_AVG_SPR = 0.317, HLTV_AVG_RMK = 1.277;
+const MK_WEIGHTS = {1:1, 2:4, 3:9, 4:16, 5:25};
+
+function isPlayerKill(k){
+  return k.attacker && k.victim && k.attacker !== k.victim;
+}
+
+// Rounds that have actually been played by this tick. A round counts once it
+// has started - the same denominator compute_stats uses is every round in the
+// table, so mid-match this is "rounds so far".
+function roundsPlayedBy(tick){
+  if(!M?.rounds?.length) return 0;
+  let n = 0;
+  for(const r of M.rounds){
+    if(r.start != null && r.start <= tick) n++;
+  }
+  return n;
+}
+
+function liveStats(name, tick){
+  if(!M || !name || tick == null) return null;
+  const rounds = roundsPlayedBy(tick);
+  const s = {kills:0, deaths:0, assists:0, hs_kills:0, damage:0,
+             entry_attempts:0, entry_success:0, opening_deaths:0,
+             traded_deaths:0, untraded_deaths:0};
+  const perRoundKills = {};      // round -> kills, for the multi-kill term
+  // Round numbers MUST be normalised to Number before going in these Sets.
+  // Object.keys() hands back strings, so mixing them with r.round_num from the
+  // rounds table stores "5" and 5 as two distinct entries - which produced a
+  // KAST of 113.6% for one player, i.e. more KAST rounds than rounds.
+  const kastRounds = new Set();
+  const diedIn = new Set();
+
+  // group this match's kills by round, up to the playhead
+  const byRound = {};
+  for(const k of M.kills||[]){
+    if(k.tick == null || k.tick > tick || k.round == null) continue;
+    (byRound[k.round] = byRound[k.round] || []).push(k);
+  }
+
+  for(const key of Object.keys(byRound)){
+    const rnd = Number(key);
+    const ks = byRound[key].sort((a,b)=>a.tick-b.tick);
+    const opener = ks.find(isPlayerKill);
+    if(opener){
+      if(opener.attacker===name){ s.entry_attempts++; s.entry_success++; }
+      if(opener.victim===name){ s.entry_attempts++; s.opening_deaths++; }
+    }
+    for(let i=0;i<ks.length;i++){
+      const k = ks[i];
+      if(k.victim===name){
+        s.deaths++; diedIn.add(rnd);
+        const traded = wasTraded(k, ks.slice(i+1));
+        if(traded){ s.traded_deaths++; kastRounds.add(rnd); }
+        else s.untraded_deaths++;
+      }
+      if(isPlayerKill(k) && k.attacker===name){
+        s.kills++; kastRounds.add(rnd);
+        perRoundKills[rnd] = (perRoundKills[rnd]||0)+1;
+        if(k.hs) s.hs_kills++;
+      }
+      if(k.assister===name){ s.assists++; kastRounds.add(rnd); }
+    }
+  }
+  // S: any started round this player did not die in. Includes rounds with no
+  // kills at all, which never appear in byRound - forgetting those is the same
+  // bug the Python side had.
+  for(const r of M.rounds||[]){
+    if(r.start != null && r.start <= tick && !diedIn.has(Number(r.round_num))){
+      kastRounds.add(Number(r.round_num));
+    }
+  }
+
+  for(const d of M.damages||[]){
+    if(d.t <= tick && d.a === name) s.damage += d.d;
+  }
+
+  s.rounds = rounds;
+  s.kd = s.deaths ? round2(s.kills/s.deaths) : s.kills;
+  s.hs_pct = s.kills ? round1(100*s.hs_kills/s.kills) : 0;
+  s.entry_win_pct = s.entry_attempts ? round1(100*s.entry_success/s.entry_attempts) : 0;
+  s.adr = rounds ? round1(s.damage/rounds) : null;
+  s.kast = rounds ? round1(100*kastRounds.size/rounds) : 0;
+  s.kpr = rounds ? s.kills/rounds : 0;
+  s.dpr = rounds ? s.deaths/rounds : 0;
+
+  if(rounds){
+    const weighted = Object.values(perRoundKills)
+      .reduce((a,c)=>a+(MK_WEIGHTS[c]||0), 0);
+    const kr = (s.kills/rounds)/HLTV_AVG_KPR;
+    const sr = ((rounds-s.deaths)/rounds)/HLTV_AVG_SPR;
+    const rmk = (weighted/rounds)/HLTV_AVG_RMK;
+    s.rating = Math.round(((kr + 0.7*sr + rmk)/2.7)*1000)/1000;
+  }else{
+    s.rating = 0;
+  }
+  return s;
+}
+
+// Same rule as is_trade() in the parser: a TEAMMATE of the victim killing the
+// killer inside the window. The killer merely dying is not a trade.
+function wasTraded(kill, later){
+  if(!isPlayerKill(kill)) return false;
+  const window = (M.tickrate||64) * 5;      // 5s, matching TRADE_WINDOW_TICKS
+  for(const l of later){
+    if(l.tick - kill.tick > window) break;
+    if(!isPlayerKill(l) || l.victim !== kill.attacker) continue;
+    const vs = kill.victim_side, ts = l.attacker_side;
+    if(vs == null || ts == null || vs === ts) return true;
+  }
+  return false;
+}
+
+const round1 = v => Math.round(v*10)/10;
+const round2 = v => Math.round(v*100)/100;
+
+// The safety net for the duplication above. At the last tick of the match the
+// live figures must equal what parse_demo.py computed, for every player and
+// every field. Run it from the console, or load the page with ?verify.
+function verifyLiveStats(){
+  // NOT the last frame tick: frames are sampled every 32 ticks, so the match
+  // ends between samples and the final kill lands 20 ticks past the last one.
+  // Using the frame tick silently drops it and makes the comparison fail for
+  // reasons that have nothing to do with the maths.
+  const lastTick = Math.max(
+    ...(M.frames||[]).map(f=>f.tick),
+    ...(M.kills||[]).map(k=>k.tick||0),
+    ...(M.damages||[]).map(d=>d.t||0), 0);
+  const fields = ["kills","deaths","assists","hs_kills","damage","kd","hs_pct",
+                  "adr","kast","rating","entry_attempts","entry_success",
+                  "opening_deaths","traded_deaths","untraded_deaths",
+                  "entry_win_pct"];
+  const problems = [];
+  for(const [name, want] of Object.entries(M.stats?.per_player||{})){
+    const got = liveStats(name, lastTick);
+    for(const f of fields){
+      if(want[f] == null) continue;
+      const a = got[f], b = want[f];
+      const same = typeof b === "number"
+        ? Math.abs((a??0) - b) < 0.051     // both sides round to 1dp
+        : a === b;
+      if(!same) problems.push(`${name}.${f}: live ${a} vs python ${b}`);
+    }
+  }
+  if(problems.length){
+    console.error("live stats DISAGREE with the parser:", problems);
+  }else{
+    console.log(`live stats match the parser exactly `
+      + `(${Object.keys(M.stats?.per_player||{}).length} players x ${fields.length} fields)`);
+  }
+  return problems;
+}
+
 // ---- live win probability ----
 // The model lives in parser/swing.py; this only reads the timeline it emits.
 // Points are stored where the value MOVES, so the lookup is a step function -
@@ -737,6 +911,20 @@ function roundSwingSoFar(name, rnd, tick){
 // The swing tile shows the match total; this rewrites its value in place with
 // the selected player's swing SO FAR in the round being watched, so it moves
 // as you play. The match figure stays available in the tile's tooltip.
+// Rebuild the whole stat grid from the events up to the playhead. Keyed so the
+// DOM is only touched when a number actually changes - stats move on kills and
+// damage, not on every one of 144 frames a second.
+let lastStatsKey="";
+function updateLiveStats(curTick){
+  if(!selected || curTick==null || !M?.stats) return;
+  const st=liveStats(selected, curTick);
+  if(!st) return;
+  const key=`${selected}|${st.kills}|${st.deaths}|${st.assists}|${st.damage}|${st.rounds}`;
+  if(key===lastStatsKey) return;
+  lastStatsKey=key;
+  renderStatGrid(selected, st);
+}
+
 let lastSwingKey="";
 function updateLiveSwing(curTick){
   const tile=$("#swing-tile");
@@ -1223,7 +1411,8 @@ function draw(){
   // Both read the playhead tick, so they belong here with the other
   // curTick-driven panels rather than up with the per-player drawing.
   updateWinProb(curTick);
-  updateLiveSwing(curTick);
+  updateLiveStats(curTick);
+  updateLiveSwing(curTick);   // after the grid rebuild: it rewrites one tile
   drawCoach(curTick);
 }
 
