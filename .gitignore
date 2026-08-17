@@ -14,3 +14,6 @@ data/*.json
 data/voice/
 __pycache__/
 .pytest_cache/
+
+# nothing here should ever hold a key; belt and braces
+*.key

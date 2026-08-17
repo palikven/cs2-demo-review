@@ -37,7 +37,13 @@ from analyze import snapshot  # noqa: E402
 
 MODEL = "claude-opus-5"
 MAX_QUESTION = 500
-MAX_BODY = 64 * 1024
+MAX_BODY = 256 * 1024        # a conversation posts its own history
+
+# ThreadingHTTPServer gives every browser tab its own thread, and every chat
+# request is a paid call on the user's key. Without a cap, a stuck page that
+# retries can quietly spend money in parallel.
+MAX_CONCURRENT_CHATS = 3
+_chat_slots = threading.Semaphore(MAX_CONCURRENT_CHATS)
 
 SYSTEM = """You are a CS2 coach answering a question about one exact moment in a \
 demo the player is reviewing.
@@ -103,10 +109,11 @@ def describe(snap):
     return "\n".join(lines)
 
 
-def ask_model(snap, question):
+def ask_model(snap, question, api_key=None):
     import anthropic
 
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(api_key=api_key or None, timeout=90,
+                                 max_retries=1)
     resp = client.messages.create(
         model=MODEL,
         max_tokens=1024,
@@ -194,10 +201,16 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/status":
-            # Lets the viewer hide the ask box rather than offer a button that
-            # can only fail.
-            return self._json(200, {"llm": bool(os.environ.get("ANTHROPIC_API_KEY")),
-                                    "model": MODEL})
+            # Lets the viewer decide between "chat is ready", "chat needs a key
+            # from you", and "there is no server at all" - three different UIs.
+            from providers import anthropic_provider as provider
+            return self._json(200, {
+                "llm": bool(os.environ.get("ANTHROPIC_API_KEY")),
+                "chat": True,
+                "model": MODEL,
+                "models": [{"id": k, "label": v[0]}
+                           for k, v in provider.MODELS.items()],
+            })
         try:
             if self._serve_range():
                 return
@@ -205,34 +218,136 @@ class Handler(SimpleHTTPRequestHandler):
             return          # the browser closed the stream mid-seek; normal
         return super().do_GET()
 
+    def _read_json(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0 or length > MAX_BODY:
+            return None
+        return json.loads(self.rfile.read(length))
+
+    def _api_key(self):
+        """
+        The user's key from the browser, else the server's own env var.
+
+        Header first so a user who has connected their own key is billed on it
+        even when the machine also has ANTHROPIC_API_KEY set - otherwise
+        "connect your own LLM" would silently spend somebody else's credit.
+        """
+        return (self.headers.get("X-Api-Key") or "").strip() \
+            or os.environ.get("ANTHROPIC_API_KEY") or ""
+
+    def _sse_open(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+
+    def _sse(self, event, payload):
+        self.wfile.write(f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+                         .encode())
+        self.wfile.flush()
+
     def do_POST(self):
+        if self.path == "/api/chat":
+            return self._chat()
         if self.path != "/api/ask":
             return self._json(404, {"error": "no such endpoint"})
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            return self._json(503, {"error": "ANTHROPIC_API_KEY is not set on the "
-                                             "server, so live questions are off."})
+        return self._ask()
+
+    def _chat(self):
+        import chat as chatmod
+        from providers import anthropic_provider as provider
+
+        key = self._api_key()
+        if not key:
+            return self._json(503, {"error": "No API key. Add one in the chat "
+                                             "panel, or set ANTHROPIC_API_KEY "
+                                             "on the server."})
         try:
-            length = int(self.headers.get("Content-Length") or 0)
-            if length <= 0 or length > MAX_BODY:
+            req = self._read_json()
+        except Exception:                              # noqa: BLE001
+            return self._json(400, {"error": "bad request body"})
+        if req is None:
+            return self._json(400, {"error": "bad request body"})
+
+        question = (req.get("question") or "").strip()
+        if not question:
+            return self._json(400, {"error": "empty question"})
+        if len(question) > chatmod.MAX_QUESTION:
+            # Reject rather than truncate: silently cutting someone's question
+            # in half and answering the stump is worse than saying no.
+            return self._json(400, {"error": f"question is too long "
+                                             f"(max {chatmod.MAX_QUESTION} characters)"})
+
+        match_name = req.get("match") or ""
+        match = load_match(match_name)
+        if match is None:
+            return self._json(404, {"error": "no such match"})
+
+        if not _chat_slots.acquire(blocking=False):
+            return self._json(429, {"error": "Too many questions in flight. "
+                                             "Wait for the current one."})
+        try:
+            player = req.get("player") or match.get("pov")
+            tick = req.get("tick")
+            system_blocks, messages = chatmod.build_request(
+                match, match_name, player=player, tick=tick, question=question,
+                history=req.get("messages"), role=req.get("role"))
+
+            self._sse_open()
+            try:
+                usage = provider.stream_chat(
+                    api_key=key, model=req.get("model") or MODEL,
+                    system_blocks=system_blocks, messages=messages,
+                    on_delta=lambda t: self._sse("delta", {"text": t}))
+            except provider.ProviderError as exc:
+                # Already vetted as safe to show - see the provider module.
+                return self._sse("error", {"error": str(exc)})
+            except Exception as exc:                   # noqa: BLE001
+                self.log_error("chat failed: %r", type(exc).__name__)
+                return self._sse("error", {"error": "The request failed on the "
+                                                    "server. Check its console."})
+
+            snap_round = snap_t = None
+            if tick is not None:
+                snap = snapshot(match, int(tick), player)
+                if snap:
+                    snap_round, snap_t = snap["round"], snap["t"]
+            self._sse("done", {"usage": usage, "round": snap_round, "t": snap_t})
+        except (BrokenPipeError, ConnectionResetError):
+            pass                                       # user navigated away
+        finally:
+            _chat_slots.release()
+
+    def _ask(self):
+        """The original single-shot endpoint, kept so older links still work."""
+        key = self._api_key()
+        if not key:
+            return self._json(503, {"error": "No API key configured."})
+        try:
+            req = self._read_json()
+            if req is None:
                 return self._json(400, {"error": "bad request body"})
-            req = json.loads(self.rfile.read(length))
             question = (req.get("question") or "").strip()[:MAX_QUESTION]
             if not question:
                 return self._json(400, {"error": "empty question"})
 
             match = load_match(req.get("match") or "")
             if match is None:
-                return self._json(404, {"error": f"no match named {req.get('match')!r}"})
+                return self._json(404, {"error": "no such match"})
 
             snap = snapshot(match, int(req.get("tick")), req.get("player"))
             if snap is None:
                 return self._json(400, {"error": "no frame at that tick"})
 
-            return self._json(200, {"answer": ask_model(snap, question),
+            return self._json(200, {"answer": ask_model(snap, question, key),
                                     "round": snap["round"], "t": snap["t"]})
-        except Exception as exc:                      # noqa: BLE001
+        except Exception as exc:                       # noqa: BLE001
+            # Log the detail, return a generic message. The exception text from
+            # an SDK auth failure can carry key fragments and request content,
+            # and with a user-supplied key that is not ours to hand back.
             self.log_error("ask failed: %r", exc)
-            return self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
+            return self._json(500, {"error": "The request failed on the server."})
 
     def log_message(self, fmt, *args):
         if "/api/" in (self.path or ""):
