@@ -160,6 +160,19 @@ the selected-player panel. Rating 1.0 is HLTV's published formula, so the number
 is the real one — 1.00 is an average player. It's also fed to the AI layers,
 which otherwise rank players by raw kills.
 
+**Everything in the selected-player panel is live.** Rating, KAST, ADR, K/D,
+HS% and the entry stats are recomputed from the events up to the playhead, so
+they show what the scoreboard said *at that moment* rather than at the end.
+Scrub a match and watch a rating build.
+
+That duplicates the parser's maths in JS, which is a real drift risk — so
+loading with `?verify` cross-checks every player and every field against what
+`parse_demo.py` computed, and logs the result to the console:
+
+```
+http://localhost:8020/viewer/index.html?match=2v5&verify
+```
+
 **Round swing:** a live win-probability bar above the team panels that moves as
 the round plays, and a Swing tile that accumulates for the selected player as
 you watch. Every death also carries what it cost — a death at 5v5 is the round,
