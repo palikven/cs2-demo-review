@@ -341,6 +341,8 @@ def parse(demo_path: Path, pov_name: str | None):
         "y": first_present(ticks_df, ["Y", "y"]),
         "z": first_present(ticks_df, ["Z", "z"]),
         "yaw": first_present(ticks_df, ["yaw", "view_angle_x", "pitch_yaw_y"]),
+        # Source convention: POSITIVE pitch is looking DOWN. Level is 0.
+        "pitch": first_present(ticks_df, ["pitch", "view_angle_y"]),
         "health": first_present(ticks_df, ["health"]),
         "team": first_present(ticks_df, ["team_name", "team_num", "team", "side"]),
         "round": first_present(ticks_df, ["round_num", "round", "total_rounds_played"]),
@@ -385,8 +387,8 @@ def parse(demo_path: Path, pov_name: str | None):
 
     # per-tick frame rows
     keep = [cols["tick"], cols["name"], cols["x"], cols["y"]]
-    for opt in ("z", "yaw", "health", "team", "round", "alive", "place",
-                "armor", "helmet", "defuser", "inventory"):
+    for opt in ("z", "yaw", "pitch", "health", "team", "round", "alive",
+                "place", "armor", "helmet", "defuser", "inventory"):
         if cols[opt]:
             keep.append(cols[opt])
     frame_rows = sampled.select(keep).sort(cols["tick"]).to_dicts()
@@ -432,6 +434,8 @@ def parse(demo_path: Path, pov_name: str | None):
         }
         if cols["yaw"] and r.get(cols["yaw"]) is not None:
             entry["yaw"] = round(float(r[cols["yaw"]]), 1)
+        if cols["pitch"] and r.get(cols["pitch"]) is not None:
+            entry["pi"] = round(float(r[cols["pitch"]]), 1)
         if cols["health"] and r.get(cols["health"]) is not None:
             entry["hp"] = int(num(r[cols["health"]]))
         if cols["team"] and r.get(cols["team"]) is not None:

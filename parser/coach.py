@@ -30,7 +30,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from analyze import analyze  # noqa: E402
+from analyze import analyze, load_match  # noqa: E402
 
 MODEL = "claude-opus-5"
 
@@ -180,6 +180,104 @@ def _flash_lines(prof, table):
         if len(ranked) > 1:
             lines.append("- Everyone's team-flash share, for scale: " + ", ".join(
                 f"{n} {t['team_share'] * 100:.0f}%" for n, t in ranked))
+    lines.append(f"- {prof['note']}")
+    return lines
+
+
+def _kit_lines(prof):
+    """
+    Utility still in hand, always with the table.
+
+    On the bundled match the POV is second best of ten. Handed the bare share
+    the model writes that up as a weakness, because 38% sounds high in
+    isolation - so the rank goes in the same sentence as the number.
+    """
+    if not prof or prof.get("share") is None:
+        return []
+    lines = ["", "UTILITY STILL IN HAND AT DEATH"]
+    lines.append(
+        f"- {prof['player']} died holding utility in "
+        f"{prof['deaths_holding_utility']} of {prof['deaths']} deaths "
+        f"({prof['share'] * 100:.0f}%) - rank {prof['rank']} of {prof['of']} "
+        f"in this match, where LOWER is better.")
+    if prof.get("table"):
+        lines.append("- Everyone, for scale: " + ", ".join(
+            f"{n} {v * 100:.0f}%" for n, v in prof["table"].items()))
+    turn = prof.get("with_a_turn") or []
+    if turn:
+        lines.append(f"- {len(turn)} of those came in duels that gave them a "
+                     f"turn to throw something:")
+        for h in turn:
+            lines.append(f"  - round {h['round']} tick {h['tick']} in "
+                         f"{h['place']} ({h['why']}): held "
+                         f"{', '.join(h['held'])}.")
+    else:
+        lines.append("- None of them came in a duel that gave them a turn, so "
+                     "there is nothing to coach here.")
+    lines.append(f"- {prof['note']}")
+    return lines
+
+
+def _aim_lines(prof):
+    """
+    Crosshair height, with the gate's verdict stated in the sheet.
+
+    The number goes in either way, because "you are 8th of 10" is worth knowing.
+    What changes is whether the model is allowed to call it a habit - handed the
+    number alone it will, and on this match that would be wrong.
+    """
+    if not prof or prof.get("median") is None:
+        return []
+    lines = ["", "CROSSHAIR HEIGHT WHILE MOVING (degrees, POSITIVE is looking "
+                 "DOWN, 0 is level)"]
+    lines.append(
+        f"- {prof['player']}: median {prof['median']}deg "
+        f"(T {prof['t']}, CT {prof['ct']}), rank {prof['rank']} of "
+        f"{prof['of']} where LOWER is better. Match median "
+        f"{prof['match_median']}deg.")
+    if prof.get("table"):
+        lines.append("- Everyone, for scale: " + ", ".join(
+            f"{n} {v}" for n, v in prof["table"].items()))
+    if prof.get("claimable"):
+        lines.append("- This holds clearly on BOTH sides, so it is about the "
+                     "player rather than the positions they played. It is fair "
+                     "to coach.")
+    else:
+        lines.append("- This does NOT hold clearly on both sides "
+                     f"(above on T: {prof.get('above_on_t')}, above on CT: "
+                     f"{prof.get('above_on_ct')}), so it may simply describe "
+                     "where they played. State the number if asked, but do NOT "
+                     "coach it as a habit.")
+    lines.append(f"- {prof['note']}")
+    return lines
+
+
+def _comms_lines(prof):
+    """
+    Comms around deaths.
+
+    The ceiling wording is repeated twice on purpose. Handed "50%" the model
+    writes "you communicate half the time", and the demo cannot support that -
+    it knows the mic was open, not what came out of it.
+    """
+    if not prof or prof.get("share") is None:
+        return []
+    lines = ["", "COMMS AROUND DEATHS (whether the MIC WAS OPEN - NOT what was "
+                 "said, and NOT proof anything useful was called)"]
+    lines.append(
+        f"- {prof['player']} had the mic open within 6s of "
+        f"{prof['called_after']} of {prof['deaths_with_time_to_call']} deaths "
+        f"that had time left in the round ({prof['share'] * 100:.0f}%), rank "
+        f"{prof['rank']} of {prof['of']}.")
+    if prof.get("table"):
+        lines.append("- Everyone, for scale: " + ", ".join(
+            f"{n} {v * 100:.0f}%" for n, v in prof["table"].items()))
+    silent = prof.get("silent_before") or []
+    if silent:
+        lines.append(
+            f"- Nobody on their side had the mic open in the 5s before "
+            f"{len(silent)} of their deaths (rounds "
+            f"{', '.join(str(b['round']) for b in silent)}).")
     lines.append(f"- {prof['note']}")
     return lines
 
@@ -360,6 +458,9 @@ def build_facts(a, match, role=None):
     lines += _duel_lines(a.get("duel_profile"))
     lines += _economy_lines(a.get("economy"))
     lines += _flash_lines(a.get("flashes"), a.get("flash_table"))
+    lines += _kit_lines(a.get("kit"))
+    lines += _aim_lines(a.get("aim"))
+    lines += _comms_lines(a.get("comms"))
 
     lines += ["", "TOTALS",
               f"- untraded deaths: {t['untraded']} of {t['deaths']}",
@@ -485,7 +586,7 @@ def main():
     args = ap.parse_args()
 
     path = Path(args.match)
-    match = json.loads(path.read_text())
+    match = load_match(path)
     a = analyze(match, args.player)
 
     if not a["player"]:

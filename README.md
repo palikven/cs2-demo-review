@@ -20,6 +20,9 @@ cs2coach/
     economy.py        # round buys, and what a death costs in guns
     flashes.py        # who each flash blinded - self, team or enemy
     prices.py         # the buy-menu price table (no heavy imports)
+    aim.py            # crosshair height while moving, gated on both sides
+    comms.py          # was the mic open around your deaths
+    kit.py            # utility still in hand when you died
     roles.py          # role evidence + what each role is judged on
     gates.py          # "is this signal strong enough to say out loud?"
   server/
@@ -29,9 +32,10 @@ cs2coach/
   viewer/
     index.html        # the 2D viewer (callouts, killfeed, coach panel, chat)
     map_calibration.json
+  tools/mutate.py     # deliberately break the code, check the tests notice
   radars/             # radar images for the Active Duty maps
   data/               # parsed match JSONs land here
-  tests/              # 428 tests
+  tests/              # 460 tests
 ```
 
 ## One-time setup

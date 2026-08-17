@@ -72,7 +72,11 @@ def load_match(name, _cache={}, _lock=threading.Lock()):
             path = path.resolve()
             if not path.is_file() or (ROOT / "data").resolve() not in path.parents:
                 return None
-            _cache[name] = json.loads(path.read_text())
+            # Shared with the CLI so the two cannot drift: without it the
+            # chat's brief silently loses the comms section, and the only
+            # symptom is a shorter sheet.
+            import analyze as _analyze
+            _cache[name] = _analyze.load_match(path)
         return _cache[name]
 
 

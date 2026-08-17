@@ -580,6 +580,38 @@ def analyze(match, player=None):
         print(f"[!] flash analysis unavailable ({exc}); continuing without it",
               file=sys.stderr)
 
+    # Utility still in hand at death. Needs `deaths` because the raw share is
+    # the misleading half - only a death that gave them a turn is coachable.
+    kit_profile = {}
+    try:
+        import kit as kitmod
+        kit_profile = kitmod.profile(match, name, deaths)
+    except Exception as exc:                       # noqa: BLE001
+        print(f"[!] kit analysis unavailable ({exc}); continuing without it",
+              file=sys.stderr)
+
+    # Vertical crosshair height while moving. Gated on holding across both
+    # sides, because looking down is correct on a ramp.
+    aim_profile = {}
+    try:
+        import aim as aimmod
+        aim_profile = aimmod.profile(match, name)
+    except Exception as exc:                       # noqa: BLE001
+        print(f"[!] aim analysis unavailable ({exc}); continuing without it",
+              file=sys.stderr)
+
+    # Comms around deaths, when a voice index exists beside the match. Never
+    # required: most demos will not have had voice.py run over them.
+    comms_profile = {}
+    voice = match.get("_voice")
+    if voice:
+        try:
+            import comms as commsmod
+            comms_profile = commsmod.profile(match, voice, name)
+        except Exception as exc:                   # noqa: BLE001
+            print(f"[!] comms analysis unavailable ({exc}); continuing",
+                  file=sys.stderr)
+
     # Evidence for the role picker - never an assignment. The viewer shows it
     # beside each name so the user chooses informed rather than blind.
     role_evidence = {}
@@ -623,6 +655,9 @@ def analyze(match, player=None):
         "role_evidence": role_evidence,
         "economy": economy_profile,
         "flashes": flash_profile,
+        "kit": kit_profile,
+        "aim": aim_profile,
+        "comms": comms_profile,
         "flash_table": flash_table,
         "totals": {
             "deaths": total_deaths,
@@ -641,6 +676,29 @@ def _fmt_place(p):
     return p or "?"
 
 
+def load_match(path):
+    """
+    Read a parsed match, attaching the voice index if one sits beside it.
+
+    Every entry point needs this identically - analyze.py's CLI, coach.py,
+    narrate.py, the server - and when it lived in one of them the others
+    silently produced a review with the comms section missing. That failure is
+    invisible: the sheet is simply shorter.
+
+    The index goes under a private key so analyze() stays a pure function of the
+    match dict rather than reaching out to the filesystem itself.
+    """
+    match = json.loads(Path(path).read_text(encoding="utf-8"))
+    vpath = Path(path).with_name(Path(path).stem + "_voice.json")
+    if vpath.exists():
+        try:
+            match["_voice"] = json.loads(vpath.read_text(encoding="utf-8"))
+        except Exception as exc:                   # noqa: BLE001
+            print(f"[!] voice index unreadable ({exc}); continuing without it",
+                  file=sys.stderr)
+    return match
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("match", help="data/<match>.json from parse_demo.py")
@@ -650,7 +708,7 @@ def main():
     args = ap.parse_args()
 
     path = Path(args.match)
-    match = json.loads(path.read_text())
+    match = load_match(path)
     a = analyze(match, args.player)
 
     if args.emit:

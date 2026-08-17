@@ -142,7 +142,8 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit("usage: python narrate.py data/your_match.json")
     path = Path(sys.argv[1])
-    match = json.loads(path.read_text())
+    from analyze import load_match
+    match = load_match(path)
     print("[*] Facts sent to model:\n")
     print(build_facts(match))
     print("\n" + "=" * 60 + "\n")
