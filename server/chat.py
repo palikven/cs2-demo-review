@@ -118,6 +118,39 @@ def round_results(match):
 
 
 _brief_cache, _brief_lock = {}, threading.Lock()
+_career_cache, _career_lock = {}, threading.Lock()
+
+
+def _career_for(match, player):
+    """
+    The player's pooled record across every parsed demo, or {}.
+
+    Never fatal: a machine with one demo, an unreadable sidecar or a slow disk
+    must still get a working chat. The career is an enrichment, not a
+    dependency.
+    """
+    who = None
+    for p in match.get("players") or []:
+        if p.get("name") == player:
+            who = str(p.get("steamid"))
+            break
+    if not who:
+        return {}
+    with _career_lock:
+        if who in _career_cache:
+            return _career_cache[who]
+    try:
+        import career as careermod
+        # Read the sidecar; never rebuild here. Analysing a match costs about a
+        # second, so recomputing would put a twenty-second stall in front of the
+        # first token for anyone with a real back catalogue.
+        out = careermod.load(ROOT / "data", who)
+    except Exception as exc:                       # noqa: BLE001
+        print(f"[chat] career unavailable: {type(exc).__name__}", flush=True)
+        out = {}
+    with _career_lock:
+        _career_cache[who] = out
+    return out
 
 
 def build_brief(match, match_name, player, role=None):
@@ -139,6 +172,11 @@ def build_brief(match, match_name, player, role=None):
     a = analyze.analyze(match, player)
     parts = [
         coachmod.build_facts(a, match),
+        # The pooled career, when more than one demo has been parsed. Sits in
+        # the CACHED half deliberately: it is the same bytes for every question
+        # about this player, and rebuilding it per turn would mean re-analysing
+        # every match they have ever played.
+        "\n".join(coachmod.career_lines(_career_for(match, player))),
         "",
         team_scoreboard(match),
         "",

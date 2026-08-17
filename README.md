@@ -23,6 +23,7 @@ cs2coach/
     aim.py            # crosshair height while moving, gated on both sides
     comms.py          # was the mic open around your deaths
     kit.py            # utility still in hand when you died
+    career.py         # one player pooled across every parsed demo
     roles.py          # role evidence + what each role is judged on
     gates.py          # "is this signal strong enough to say out loud?"
   server/
@@ -35,7 +36,7 @@ cs2coach/
   tools/mutate.py     # deliberately break the code, check the tests notice
   radars/             # radar images for the Active Duty maps
   data/               # parsed match JSONs land here
-  tests/              # 460 tests
+  tests/              # 494 tests
 ```
 
 ## One-time setup
@@ -336,6 +337,54 @@ so rather than letting the model fill the gap.
 ```bash
 python parser/flashes.py data/2v5.json    # every player's flash record
 ```
+
+## Across matches
+
+This is what the reliability gates were always waiting for. Three deaths in one
+callout out of sixteen is not a habit, it's a Tuesday — so most claims worth
+making get suppressed on a single demo. Pool ten and the same three-per-match
+becomes thirty out of a hundred and sixty.
+
+The bar doesn't move. The sample does.
+
+```bash
+python parser/parse_demo.py match2.dem --pov "YourName"   # once per demo
+python parser/career.py --player "YourName" --emit
+```
+
+Writes `data/career.json`. The coach chat reads it, so questions like *"is Main
+always a problem for me or just tonight?"* have something behind them.
+
+```
+WHERE THEY DIE
+  Main    5 deaths in 3/4 matches  <- habit
+  Canal   2 deaths in 2/4 matches
+
+RATES (pooled, not averaged)
+  team_flash             11/24    46%   trend +33pp
+  died_holding_utility    6/16    38%   trend +13pp
+```
+
+**Pooled, not averaged** — that word is doing real work. A player who died once
+in match A while holding utility (100%) and twenty times in match B holding it
+ten (50%) is at 11/21 = 52%, not 75%. Averaging per-match percentages weights a
+one-death match the same as a twenty-death one. Every rate here is a summed
+numerator over a summed denominator; the per-match series is kept only to show
+direction.
+
+A hotspot needs **both** bars: enough deaths to be real, *and* spread across
+enough matches that one bad night can't manufacture it. Twelve deaths in Main
+across one of four matches is not a habit.
+
+Identity is the steamid, not the name — people rename constantly.
+
+Two limits worth knowing. Matches are ordered by **file modification time**,
+which is when the demo was *parsed*, not when it was played, so check the labels
+before reading a trend as improvement. And `career.json` goes stale the moment
+you parse a new demo — it records what it was built from so you can tell. It's a
+sidecar rather than something the chat computes because analysing a match costs
+about a second, and twenty demos would put a twenty-second stall in front of
+your first reply.
 
 **Rating:** HLTV Rating 1.0 and KAST per player, shown next to each name and in
 the selected-player panel. Rating 1.0 is HLTV's published formula, so the number

@@ -282,6 +282,41 @@ def _comms_lines(prof):
     return lines
 
 
+def career_lines(c):
+    """
+    The pooled career, when there is one.
+
+    Kept separate from build_facts() because it is not about this match - the
+    chat appends it so a question like "is Main always a problem for me" has
+    something behind it other than tonight.
+    """
+    if not c or c.get("matches", 0) < 2:
+        return []
+    lines = ["", f"ACROSS {c['matches']} PARSED MATCHES ({c['deaths']} deaths "
+                 f"total). This is the pooled record, NOT this match."]
+    notable = [h for h in c.get("hotspots") or [] if h.get("notable")]
+    if notable:
+        for h in notable[:5]:
+            lines.append(f"- {h['place']}: {h['deaths']} deaths across "
+                         f"{h['matches']} of {c['matches']} matches "
+                         f"({h['share_of_deaths'] * 100:.0f}% of all their "
+                         f"deaths).")
+    else:
+        lines.append("- No death spot clears the bar across matches yet. Do "
+                     "NOT name one anyway.")
+    for key, r in (c.get("rates") or {}).items():
+        line = (f"- {key.replace('_', ' ')}: {r['n']} of {r['of']} "
+                f"({r['rate'] * 100:.0f}%) over {r['matches']} matches")
+        if r.get("trend"):
+            d = r["trend"]["delta"] * 100
+            line += (f"; first half of that span {r['trend']['early'] * 100:.0f}%"
+                     f" vs second half {r['trend']['late'] * 100:.0f}% "
+                     f"({d:+.0f}pp)")
+        lines.append(line + ".")
+    lines.append(f"- {c['note']}")
+    return lines
+
+
 def _economy_lines(prof):
     """Match totals. Sums of prices, so no significance test applies."""
     if not prof or not prof.get("deaths_priced"):
