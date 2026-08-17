@@ -1555,6 +1555,23 @@ function approachLine(d){
     style="color:var(--ink-faint)">· ${bits.join(" · ")}</span>`;
 }
 
+// Buy context and what the gun was worth. Both sides always, because the
+// mistake is the gap: "you were on a full buy" alone reads as praise.
+const BUY_WORDS={pistol:"pistol round",eco:"eco",force:"force",semi:"semi",full:"full buy"};
+function economyLine(d){
+  if(!d.buy && d.gun_lost==null) return "";
+  const bits=[];
+  if(d.buy && d.enemy_buy)
+    // Both sides, except when they're the same - "pistol round vs their pistol
+    // round" says nothing twice.
+    bits.push(d.buy===d.enemy_buy
+      ? `${BUY_WORDS[d.buy]||d.buy} both sides`
+      : `${BUY_WORDS[d.buy]||d.buy} vs their ${BUY_WORDS[d.enemy_buy]||d.enemy_buy}`);
+  if(d.gun_lost!=null)
+    bits.push(`<b class="${d.armed_them?"warn":""}">$${d.gun_lost}</b> lost to $${d.gun_risked}`);
+  return `<div class="ln" style="color:var(--ink-faint)" title="Equipment prices, grenades excluded — not HLTV's scale, and not money. The demo doesn't record whether a dropped weapon was picked up.">${bits.join(" · ")}</div>`;
+}
+
 function deathCard(d, live){
   const tip = (COACH?.deaths||[]).find(x=>x.round===d.round && x.tick===d.tick);
   const mate = d.nearest_mate!=null
@@ -1574,6 +1591,7 @@ function deathCard(d, live){
       <i>&lt;-</i> ${esc(calloutLabel(d.attacker_place||"?"))}
       <i>·</i> ${esc(d.weapon||"?")}</div>
     <div class="ln" style="margin-top:6px;color:var(--ink-dim)">${mate}${approachLine(d)}</div>
+    ${economyLine(d)}
     <div class="tags">${tagsFor(d).map(([txt,cls])=>
       `<span class="tag ${cls}">${esc(txt)}</span>`).join("")}</div>
     ${tip?`<div class="tip"><div class="vd">${esc(tip.verdict)}</div>${esc(tip.tip)}</div>`:""}

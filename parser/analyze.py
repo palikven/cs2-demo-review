@@ -556,6 +556,18 @@ def analyze(match, player=None):
         print(f"[!] duel approach unavailable ({exc}); continuing without it",
               file=sys.stderr)
 
+    # Buy state and what each duel cost in guns. Attached before the swing pass
+    # so a death card can put "you were on a full buy, they were on an eco"
+    # beside what the death cost the round - the two together are the argument.
+    economy_profile = {}
+    try:
+        import economy as econmod
+        econmod.annotate(match, deaths, kills, name)
+        economy_profile = econmod.profile(match, name)
+    except Exception as exc:                       # noqa: BLE001
+        print(f"[!] economy unavailable ({exc}); continuing without it",
+              file=sys.stderr)
+
     # Evidence for the role picker - never an assignment. The viewer shows it
     # beside each name so the user chooses informed rather than blind.
     role_evidence = {}
@@ -597,6 +609,7 @@ def analyze(match, player=None):
         "isolation_profile": isolation_profile(deaths, kills),
         "duel_profile": duel_profile,
         "role_evidence": role_evidence,
+        "economy": economy_profile,
         "totals": {
             "deaths": total_deaths,
             "untraded": sum(1 for d in deaths if not d["traded"]),

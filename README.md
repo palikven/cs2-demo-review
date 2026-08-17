@@ -17,6 +17,8 @@ cs2coach/
     duels.py          # movement and ground closed in the seconds before a duel
     coach.py          # analysis -> per-death verdicts and fixes            (Claude)
     narrate.py        # stats    -> plain-language team review              (Claude)
+    economy.py        # round buys, and what a death costs in guns
+    prices.py         # the buy-menu price table (no heavy imports)
     roles.py          # role evidence + what each role is judged on
     gates.py          # "is this signal strong enough to say out loud?"
   server/
@@ -28,7 +30,7 @@ cs2coach/
     map_calibration.json
   radars/             # radar images for the Active Duty maps
   data/               # parsed match JSONs land here
-  tests/              # 390 tests
+  tests/              # 411 tests
 ```
 
 ## One-time setup
@@ -262,6 +264,36 @@ anything. It earns the claim across a season, not one match.
 
 ```bash
 python parser/duels.py data/2v5.json      # every duel you lost, and the test
+```
+
+**Round economy — the other half of "what should I do in later rounds".** Every
+death carries what both sides were carrying when it happened, because the same
+push is correct on a full buy against a full buy and round-losing on a full buy
+against an eco. Buy state per side is measured at freeze-end (read during freeze
+time, everyone looks like an eco) and divided by the players actually on that
+side, so a 4v5 round isn't an eco because somebody disconnected.
+
+Then the part no scoreboard shows: **what the death cost in guns**.
+
+```
+R17 · 11s  BRIDGE <- BRIDGE · fiveseven
+full buy vs their eco · $2700 lost to $500
+```
+
+Three times in the bundled match the POV loses a $2700 rifle to a $500–$700
+pistol, once a $4750 AWP to a $1250 MP9. You're down the round *and* down the
+weapon, and three of those came in rounds where their side was clearly the
+poorer one — which is exactly the buy state where taking a duel you didn't have
+to take is most expensive.
+
+It will not tell you the enemy picked the gun up. They often do; it isn't in the
+demo, and a model handed that sentence states it as something that happened. So
+the wording everywhere is "lost X while they risked Y". These are equipment
+prices with grenades excluded, so they run below HLTV's scale and shouldn't be
+compared against it — only against a full buy on the same scale.
+
+```bash
+python parser/economy.py data/2v5.json    # round buys + what your deaths cost
 ```
 
 **Rating:** HLTV Rating 1.0 and KAST per player, shown next to each name and in

@@ -121,6 +121,57 @@ def _approach_tags(d):
     return out
 
 
+def _economy_tags(d):
+    """
+    The buy context and what the gun was worth.
+
+    Both sides' buy state, always together: "you were on a full buy" alone
+    invites the wrong conclusion half the time, because the mistake is the gap,
+    not the number.
+    """
+    out = []
+    if d.get("buy") and d.get("enemy_buy"):
+        out.append(f"your side was on a {d['buy']} buy (${d.get('buy_value', 0)}), "
+                   f"theirs on a {d['enemy_buy']} (${d.get('enemy_buy_value', 0)})")
+    if d.get("gun_lost") is not None:
+        line = (f"you lost a ${d['gun_lost']} weapon to someone risking "
+                f"${d.get('gun_risked', 0)}")
+        if d.get("armed_them"):
+            # Named carefully: the demo does not record a pickup.
+            line += (" - a big one-way loss. Do NOT say they picked it up; "
+                     "the demo does not record that")
+        out.append(line)
+    return out
+
+
+def _economy_lines(prof):
+    """Match totals. Sums of prices, so no significance test applies."""
+    if not prof or not prof.get("deaths_priced"):
+        return []
+    lines = ["", "ECONOMY (equipment prices, NOT money and NOT HLTV's scale - "
+                 "grenades are excluded)"]
+    lines.append(
+        f"- Lost ${prof['value_lost']} of weapons across "
+        f"{prof['deaths_priced']} deaths; took ${prof['value_taken']} across "
+        f"{prof['kills_priced']} kills. Net ${prof['net']:+}.")
+    if prof.get("armed_them"):
+        for a in prof["armed_them"]:
+            lines.append(f"- round {a['round']} tick {a['tick']}: lost a "
+                         f"${a['lost']} weapon to a ${a['risked']} "
+                         f"{a['weapon']}.")
+        lines.append("- Those are one-way losses: down the round AND down the "
+                     "weapon. The demo does NOT show whether the enemy picked "
+                     "any of them up, so do not claim they did.")
+    if prof.get("deaths_while_richer"):
+        lines.append(
+            f"- {prof['deaths_while_richer']} of those deaths came in rounds "
+            f"where this player's side was clearly the better-equipped one. "
+            f"That is the buy state where taking a duel you do not have to take "
+            f"is most expensive.")
+    lines.append(f"- {prof['note']}")
+    return lines
+
+
 def _duel_lines(prof):
     """The aggregate, which usually amounts to 'do not generalise from this'."""
     if not prof or not prof.get("deaths_measured"):
@@ -228,6 +279,7 @@ def build_facts(a, match, role=None):
             if d.get(flag):
                 tags.append(text)
         tags += _approach_tags(d)
+        tags += _economy_tags(d)
         lines.append(" ".join(bits) + " | " + "; ".join(tags))
 
     lines += ["", "WHERE THIS PLAYER DIES (rolled up across the match)"]
@@ -266,6 +318,7 @@ def build_facts(a, match, role=None):
                      "claim it is.")
 
     lines += _duel_lines(a.get("duel_profile"))
+    lines += _economy_lines(a.get("economy"))
 
     lines += ["", "TOTALS",
               f"- untraded deaths: {t['untraded']} of {t['deaths']}",
