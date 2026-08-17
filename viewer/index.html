@@ -155,6 +155,10 @@
 
   #chat-key{padding:12px 14px;border-bottom:1px solid var(--line)}
   .chat-note{font-size:11px;line-height:1.5;color:var(--ink-faint)}
+  #chat-role{padding:10px 14px;border-bottom:1px solid var(--line)}
+  .chat-roles-row{display:flex;gap:6px}
+  .chat-roles-row select{flex:1;min-width:0}
+  #chat-role-ev{margin-top:6px;font-family:var(--mono)}
   .chat-keyrow{display:flex;gap:6px;margin:8px 0 6px}
   .chat-keyrow input{flex:1;min-width:0;background:var(--panel-2);
     border:1px solid var(--line);border-radius:6px;color:var(--ink);
@@ -284,6 +288,19 @@
         <button id="chat-key-save">SAVE</button>
       </div>
       <div class="chat-note" id="chat-key-status"></div>
+    </div>
+
+    <!-- Match type decides whether a role is even a question. A pug has no
+         roles; asking anyway invites an answer that isn't true. -->
+    <div id="chat-role">
+      <div class="chat-roles-row">
+        <select id="chat-matchtype" title="A pug has no roles. A team match does, and the same death means opposite things depending on which one you were playing.">
+          <option value="pug">FACEIT pug · no roles</option>
+          <option value="team">Team match · pick roles</option>
+        </select>
+        <select id="chat-role-pick" style="display:none" title="What this player was actually trying to do. It changes what the coach holds against them."></select>
+      </div>
+      <div class="chat-note" id="chat-role-ev" style="display:none"></div>
     </div>
 
     <div id="chat-log"></div>
@@ -1677,8 +1694,60 @@ async function initChat(){
     .map(m=>`<option value="${esc(m.id)}">${esc(m.label)}</option>`).join("");
   sel.value=chatModel();
   sel.onchange=()=>localStorage.setItem(MODEL_STORE,sel.value);
+  initRoleUi();
   refreshKeyUi();
   renderChat();
+}
+
+// --- roles ----------------------------------------------------------------
+// Match type first, because it decides whether a role is even a question. A pug
+// has no roles; offering the picker anyway invites an answer that isn't true
+// and then feeds it to the model as fact.
+//
+// The demo's evidence sits under the picker so the choice is informed. It is
+// evidence, never an assignment: 22 rounds hold 22 opening duels across ten
+// players, and roles.py refuses to infer from that.
+const ROLE_LABELS=[["","— no role —"],["igl","IGL"],["awper","AWPer"],
+                   ["entry","Entry"],["support","Support"],
+                   ["anchor","Anchor"],["rifle","Rifler"]];
+const TYPE_STORE="cs2coach.matchtype", ROLE_STORE="cs2coach.role";
+
+const matchType = () => localStorage.getItem(TYPE_STORE) || "pug";
+// A role only exists in a team match. Reading it in a pug would let a stale
+// pick from a previous demo silently reshape this one's coaching.
+const chatRole  = () => matchType()==="team"
+  ? (localStorage.getItem(ROLE_STORE+":"+(MATCH_NAME||""))||"")||null : null;
+
+function initRoleUi(){
+  const type=$("#chat-matchtype"), pick=$("#chat-role-pick");
+  pick.innerHTML=ROLE_LABELS
+    .map(([v,l])=>`<option value="${v}">${esc(l)}</option>`).join("");
+  type.value=matchType();
+  pick.value=localStorage.getItem(ROLE_STORE+":"+(MATCH_NAME||""))||"";
+  type.onchange=()=>{ localStorage.setItem(TYPE_STORE,type.value); refreshRoleUi(); };
+  pick.onchange=()=>{
+    const k=ROLE_STORE+":"+(MATCH_NAME||"");
+    if(pick.value) localStorage.setItem(k,pick.value); else localStorage.removeItem(k);
+    refreshRoleUi();
+  };
+  refreshRoleUi();
+}
+
+function refreshRoleUi(){
+  const team=matchType()==="team";
+  $("#chat-role-pick").style.display = team ? "" : "none";
+  const box=$("#chat-role-ev");
+  const ev=(ANALYSIS?.role_evidence||{})[ANALYSIS?.player];
+  if(!team||!ev){ box.style.display="none"; return; }
+  box.style.display="";
+  const bits=[`${ev.opening_kills}W/${ev.opening_deaths}L of this match's `
+              +`${ev.opening_duels_in_match} opening duels`];
+  if(ev.awp_rounds) bits.push(`AWP in ${ev.awp_rounds}/${ev.rounds} rounds`);
+  bits.push(`${ev.nades} nades (team avg ${Math.round(ev.team_average_nades)})`);
+  box.innerHTML = esc(bits.join(" · "))
+    + (ev.suggested
+        ? `<br>Evidence is lopsided enough to suggest <b>${esc(ev.suggested)}</b>.`
+        : `<br>Not lopsided enough to suggest a role — this is one match.`);
 }
 
 function refreshKeyUi(){
@@ -1784,7 +1853,7 @@ async function sendChat(question){
                             chatKey()?{"X-Api-Key":chatKey()}:{}),
       body:JSON.stringify({
         match:MATCH_NAME, player:ANALYSIS?.player||M.pov, tick,
-        model:chatModel(),
+        model:chatModel(), role:chatRole(),
         // Only the turns, never the stamps - the server rebuilds its own context.
         messages:CHAT.slice(0,-2).filter(m=>!m.error)
                      .map(m=>({role:m.role,content:m.content})),

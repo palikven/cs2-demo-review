@@ -30,15 +30,21 @@ analyze.py does not even construct them. That invariant is the whole reason the
 answers are worth reading, and it is easy to break by "helpfully" widening the
 context, so there is a test pinning it.
 
-ROLES - designed for, not built
--------------------------------
-A future version will ask whether this was a FACEIT pug (no roles) or a team
-match, and in the team case let the user assign IGL / AWPer / Entry / Support /
-Anchor and the positions each played. The plumbing is here: `role` rides through
-the request, the context payload and into the system prompt via ROLE_GUIDANCE,
-which ships EMPTY on purpose. Writing per-role coaching rules needs its own
-design pass - what actually differs in the advice - and guessing now would bake
-in the wrong answer.
+ROLES
+-----
+A FACEIT pug has no roles; a team match does, and the same death means opposite
+things depending on which one you were playing. An entry dying first at 5v5 did
+their job if someone traded them; an anchor dying first at 5v5 threw the round.
+
+The rules live in roles.ROLE_GUIDANCE - one place, shared with the batch coach,
+because two copies of "what an anchor is judged on" will drift and nobody will
+notice which one the answer came from. Every entry names the fields the
+judgement rests on and what NOT to hold against that role; a rulebook that only
+adds priorities makes every role sound like a fragger with extra homework.
+
+The role is the user's to state. roles.py can show what the demo says about each
+player but will not infer the assignment from one match - 22 rounds hold 22
+opening duels shared across ten players.
 """
 
 import json
@@ -51,6 +57,7 @@ sys.path.insert(0, str(ROOT / "parser"))
 
 import analyze  # noqa: E402
 import coach as coachmod  # noqa: E402
+import roles as rolesmod  # noqa: E402
 
 MAX_QUESTION = 2000          # a pasted round description is a fair question
 MAX_HISTORY_TURNS = 24       # 12 exchanges; older ones are dropped oldest-first
@@ -77,8 +84,8 @@ either. Do not invent an enemy position to justify an answer.
 Answer short. Two to four sentences unless they ask for detail. They are mid- \
 review with the demo paused, so give them the read and let them ask again."""
 
-# Empty on purpose - see the module docstring. Keys will be role names.
-ROLE_GUIDANCE = {}
+# Re-exported so callers have one name to reach for; roles.py owns the content.
+ROLE_GUIDANCE = rolesmod.ROLE_GUIDANCE
 
 
 def _clip(text, limit):
@@ -121,6 +128,9 @@ def build_brief(match, match_name, player, role=None):
     the turns of a conversation or the cache misses and every follow-up pays
     full price for ~4k tokens.
     """
+    # Normalised before it reaches the key, or "AWPer" and "awper" become two
+    # entries holding identical text and the second conversation pays full price.
+    role = (role or "").strip().lower() or None
     key = (match_name, player, role)
     with _brief_lock:
         if key in _brief_cache:
@@ -134,9 +144,11 @@ def build_brief(match, match_name, player, role=None):
         "",
         round_results(match),
     ]
-    guidance = ROLE_GUIDANCE.get(role)
+    # Normalised through roles.guidance() so "AWPer", "awper" and " awper "
+    # are one cache key's worth of the same text rather than three.
+    guidance = rolesmod.guidance(role)
     if guidance:
-        parts += ["", f"THIS PLAYER'S ROLE: {role}", guidance]
+        parts += ["", f"THIS PLAYER'S ROLE: {role.upper()}", guidance]
 
     brief = "\n".join(parts)
     with _brief_lock:

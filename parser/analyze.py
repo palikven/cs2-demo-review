@@ -556,6 +556,18 @@ def analyze(match, player=None):
         print(f"[!] duel approach unavailable ({exc}); continuing without it",
               file=sys.stderr)
 
+    # Evidence for the role picker - never an assignment. The viewer shows it
+    # beside each name so the user chooses informed rather than blind.
+    role_evidence = {}
+    try:
+        import roles as rolesmod
+        role_evidence = rolesmod.evidence(match)
+        for n, e in role_evidence.items():
+            e["suggested"] = rolesmod.suggest(e)
+    except Exception as exc:                       # noqa: BLE001
+        print(f"[!] role evidence unavailable ({exc}); continuing without it",
+              file=sys.stderr)
+
     for d in deaths:
         s = swing_by_tick.get(d["tick"])
         if s:
@@ -584,6 +596,7 @@ def analyze(match, player=None):
         "phase_profile": phase_profile(deaths),
         "isolation_profile": isolation_profile(deaths, kills),
         "duel_profile": duel_profile,
+        "role_evidence": role_evidence,
         "totals": {
             "deaths": total_deaths,
             "untraded": sum(1 for d in deaths if not d["traded"]),

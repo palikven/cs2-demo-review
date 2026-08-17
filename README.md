@@ -17,6 +17,7 @@ cs2coach/
     duels.py          # movement and ground closed in the seconds before a duel
     coach.py          # analysis -> per-death verdicts and fixes            (Claude)
     narrate.py        # stats    -> plain-language team review              (Claude)
+    roles.py          # role evidence + what each role is judged on
     gates.py          # "is this signal strong enough to say out loud?"
   server/
     app.py            # serves the viewer; routes /api/chat and /api/ask
@@ -27,7 +28,7 @@ cs2coach/
     map_calibration.json
   radars/             # radar images for the Active Duty maps
   data/               # parsed match JSONs land here
-  tests/              # 367 tests
+  tests/              # 390 tests
 ```
 
 ## One-time setup
@@ -157,13 +158,46 @@ The enemy-blindness rule below applies here too, and is the reason the answers
 are worth anything: the coach gets what *you* knew at that tick, plus what the
 demo proves happened afterwards. Never live enemy positions.
 
-**Roles are designed for, not built.** A later version will ask whether a demo
-was a FACEIT pug or a team match and let you assign IGL / AWPer / Entry /
-Support / Anchor with the positions each played. The plumbing is in place —
-`role` rides through the request and into the prompt via a `ROLE_GUIDANCE` dict
-in `server/chat.py` that ships empty on purpose. What actually differs in the
-advice per role needs its own design pass; guessing now would bake in the wrong
-answer.
+### Roles
+
+The panel asks what kind of match this was before it asks anything else. A
+**FACEIT pug** has no roles and the picker stays hidden — offering it anyway
+invites an answer that isn't true and then feeds it to the model as fact. A
+**team match** unlocks IGL / AWPer / Entry / Support / Anchor / Rifler.
+
+It matters because the same death means opposite things depending on the job.
+An entry dying first at 5v5 did their job if someone traded them; an anchor
+dying first at 5v5 threw the round. So every role's rules say what to weigh
+*and what to stop holding against them* — an anchor is not criticised for dying
+isolated, because holding alone is the assignment, and an entry is never coached
+toward survival, because an entry who stops entering isn't one. A rulebook that
+only adds priorities makes every role sound like a fragger with extra homework.
+
+Rules live in `parser/roles.py` and are shared by the chat and the batch coach —
+two copies of "what an anchor is judged on" would drift and you'd never know
+which one an answer came from.
+
+**The demo won't pick for you.** Under the picker it shows what this match
+actually says about the player — their share of the opening duels, AWP rounds,
+grenades thrown against their own team's average — and then usually tells you
+it isn't enough:
+
+```
+1W/1L of this match's 22 opening duels · AWP in 1/22 rounds · 60 nades (team avg 39)
+Not lopsided enough to suggest a role — this is one match.
+```
+
+That's the honest answer for a pug. 22 rounds hold 22 opening duels shared
+across ten players, so the busiest player has five — a coin landing heads five
+times. `roles.suggest()` only speaks when the evidence is genuinely lopsided
+(half a match holding an AWP, a third of the opening duels), needs at least 12
+rounds before it says anything at all, and never guesses the IGL: nothing in a
+demo distinguishes the caller, and even with voice extracted, talk time is not
+leadership.
+
+```bash
+python parser/roles.py data/2v5.json      # role evidence, per player
+```
 
 ## The one design rule that matters
 

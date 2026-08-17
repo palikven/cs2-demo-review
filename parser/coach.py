@@ -152,7 +152,7 @@ def _duel_lines(prof):
     return lines
 
 
-def build_facts(a, match):
+def build_facts(a, match, role=None):
     """
     Flatten the analysis into an unambiguous text fact sheet.
 
@@ -273,6 +273,13 @@ def build_facts(a, match):
               f"- deaths re-peeking a duel a teammate just lost: {t['repeek_deaths']}",
               f"- deaths while already a man down: {t['deaths_while_down']}",
               f"- deaths to an AWP: {t['deaths_to_awp']}"]
+
+    # Last, because it reframes everything above it: what this player was
+    # actually trying to do decides which of these numbers is a problem.
+    import roles as rolesmod
+    guidance = rolesmod.guidance(role)
+    if guidance:
+        lines += ["", f"THIS PLAYER'S ROLE: {role.strip().upper()}", guidance]
     return "\n".join(lines)
 
 

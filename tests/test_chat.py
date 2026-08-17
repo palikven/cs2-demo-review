@@ -214,30 +214,82 @@ class TestHistory:
         assert chatmod.clamp_history(None) == []
 
 
-class TestRoleSlot:
+class TestRoleGuidance:
     """
-    Roles are designed for, not built. These pin the seam so adding them later
-    is a data change rather than a refactor.
+    The rules that make a role mean something. The failure mode is a rulebook
+    that only ADDS priorities - then every role reads as "a fragger with extra
+    homework" and an anchor gets told to stop dying isolated, which is the
+    assignment.
     """
 
-    def test_role_guidance_ships_empty(self):
-        assert chatmod.ROLE_GUIDANCE == {}, \
-            "role rules landed without the design pass they need"
+    def test_every_specialist_role_says_what_not_to_judge_them_on(self):
+        """
+        `rifle` is the exception by definition - it IS the no-specialisation
+        role, so it has nothing to exempt and says so. Any other role that only
+        adds priorities is the bug this class exists for.
+        """
+        for role, text in chatmod.ROLE_GUIDANCE.items():
+            if role == "rifle":
+                assert "no role-specific exemptions" in text.lower()
+                continue
+            assert "do not" in text.lower(), \
+                f"{role} adds priorities without removing any"
+
+    def test_the_roles_the_user_asked_for_all_exist(self):
+        for role in ("igl", "awper", "entry", "support", "anchor", "rifle"):
+            assert chatmod.ROLE_GUIDANCE.get(role), f"{role} has no guidance"
 
     def test_an_unknown_role_changes_nothing(self, real_match):
         plain = chatmod.build_brief(real_match, "_fixture", real_match["pov"])
         with_role = chatmod.build_brief(real_match, "_fixture",
-                                        real_match["pov"], role="awper")
+                                        real_match["pov"], role="rocket-league")
         assert plain == with_role
 
-    def test_a_known_role_is_threaded_into_the_brief(self, real_match, monkeypatch):
-        monkeypatch.setitem(chatmod.ROLE_GUIDANCE, "awper",
-                            "Judge them on opening picks held from range.")
+    def test_a_known_role_reaches_the_brief(self, real_match):
         chatmod._brief_cache.clear()
         out = chatmod.build_brief(real_match, "_fixture", real_match["pov"],
-                                  role="awper")
-        assert "awper" in out.lower() and "opening picks" in out
+                                  role="anchor")
+        assert "THIS PLAYER'S ROLE: ANCHOR" in out
+        assert chatmod.ROLE_GUIDANCE["anchor"] in out
         chatmod._brief_cache.clear()
+
+    def test_the_role_sits_after_the_facts_it_reframes(self, real_match):
+        """
+        Guidance before the numbers is a preamble; after them it is an
+        instruction about what was just read.
+        """
+        chatmod._brief_cache.clear()
+        out = chatmod.build_brief(real_match, "_fixture", real_match["pov"],
+                                  role="entry")
+        assert out.index("DEATHS") < out.index("THIS PLAYER'S ROLE")
+        chatmod._brief_cache.clear()
+
+    def test_case_and_spacing_do_not_split_the_cache(self, real_match):
+        """
+        "AWPer" and "awper" are the same role. Keyed raw they are two entries
+        holding identical text, and the second conversation re-bills the whole
+        brief for nothing.
+        """
+        chatmod._brief_cache.clear()
+        a = chatmod.build_brief(real_match, "_fixture", real_match["pov"],
+                                role="AWPer")
+        b = chatmod.build_brief(real_match, "_fixture", real_match["pov"],
+                                role="  awper ")
+        assert a is b, "the same role produced two cache entries"
+        chatmod._brief_cache.clear()
+
+    def test_an_anchor_is_not_told_off_for_being_alone(self):
+        """
+        The one that would silently ruin anchor coaching: the sheet reports
+        isolation as a negative for everyone, and an anchor holds alone by
+        assignment.
+        """
+        text = chatmod.ROLE_GUIDANCE["anchor"].lower()
+        assert "isolat" in text and "do not judge them on being isolated" in text
+
+    def test_an_entry_is_not_coached_toward_survival(self):
+        text = chatmod.ROLE_GUIDANCE["entry"].lower()
+        assert "survival" in text or "staying alive" in text
 
 
 class TestQuestionLimits:
