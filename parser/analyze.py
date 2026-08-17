@@ -568,6 +568,18 @@ def analyze(match, player=None):
         print(f"[!] economy unavailable ({exc}); continuing without it",
               file=sys.stderr)
 
+    # Who this player's flashes actually caught. Kept beside the match table so
+    # a team-flash rate has the other nine players to mean anything against.
+    flash_profile, flash_table = {}, {}
+    try:
+        import flashes as flashmod
+        if ((match.get("utility") or {}).get("blinds")):
+            flash_profile = flashmod.profile(match, name)
+            flash_table = flashmod.match_table(match)
+    except Exception as exc:                       # noqa: BLE001
+        print(f"[!] flash analysis unavailable ({exc}); continuing without it",
+              file=sys.stderr)
+
     # Evidence for the role picker - never an assignment. The viewer shows it
     # beside each name so the user chooses informed rather than blind.
     role_evidence = {}
@@ -610,6 +622,8 @@ def analyze(match, player=None):
         "duel_profile": duel_profile,
         "role_evidence": role_evidence,
         "economy": economy_profile,
+        "flashes": flash_profile,
+        "flash_table": flash_table,
         "totals": {
             "deaths": total_deaths,
             "untraded": sum(1 for d in deaths if not d["traded"]),

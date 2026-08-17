@@ -109,7 +109,8 @@ class TestTimedUtility:
 
 class TestExportedShape:
     def test_every_kind_is_present(self, util):
-        assert set(util) == {"smokes", "fires", "flashes", "hes", "throws"}
+        assert set(util) == {"smokes", "fires", "flashes", "hes", "throws",
+                             "blinds"}
 
     def test_timed_utility_has_a_valid_window(self, util):
         for key in ("smokes", "fires"):
@@ -134,11 +135,25 @@ class TestExportedShape:
 
     def test_every_event_has_a_position(self, util):
         for key, items in util.items():
+            # blinds are the one kind with no position, and correctly so:
+            # player_blind records who was caught and for how long, not where
+            # anybody stood. Nothing draws them, so there is nothing to place.
+            if key == "blinds":
+                continue
             for e in items:
                 if key == "throws":
                     assert len(e["p"]) >= 2
                 else:
                     assert e["x"] is not None and e["y"] is not None
+
+    def test_blinds_carry_who_caught_them_and_for_how_long(self, util):
+        """
+        The three fields the coaching depends on. A blind with no victim cannot
+        be told apart from a team-flash, which is the whole point of the export.
+        """
+        for e in util["blinds"]:
+            assert e["by"] and e["who"]
+            assert e["d"] > 0 and e["r"] is not None
 
 
 class TestJoinSanity:

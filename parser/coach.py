@@ -144,6 +144,46 @@ def _economy_tags(d):
     return out
 
 
+def _flash_lines(prof, table):
+    """
+    Flashes, always with the other nine players beside them.
+
+    "You team-flash" is nagging. "You throw the second-most flashes in the match
+    and 46% of the meaningful ones blind your own side, against RENAT4IK's 13%"
+    is a habit with a benchmark, and the model can only say the second if it is
+    handed the table.
+    """
+    if not prof or not prof.get("blinds"):
+        return []
+    lines = ["", "FLASHES (blinds of 0.7s+; one flash can catch an enemy and a "
+                 "teammate at once, so these are counts and NOT a score)"]
+    lines.append(
+        f"- {prof['player']}: {prof['enemy_meaningful']} enemies blinded "
+        f"({prof['enemy_seconds']}s), {prof['team_meaningful']} teammates "
+        f"({prof['team_seconds']}s).")
+    if prof.get("team_share") is not None:
+        lines.append(f"- That is {prof['team_share'] * 100:.0f}% of their "
+                     f"meaningful flashes landing on their own team.")
+    if prof.get("worst_victim"):
+        who, n = prof["worst_victim"]
+        lines.append(f"- Most often blinded: {who}, {n} times.")
+    for h in (prof.get("full_team_blinds") or [])[:4]:
+        lines.append(f"- round {h['round']} tick {h['tick']}: {h['who']} "
+                     f"blinded {h['d']}s - long enough to be out of the round.")
+    if prof.get("follow_ups"):
+        lines.append(f"- {len(prof['follow_ups'])} enemies died while blinded "
+                     f"by them.")
+    if table:
+        ranked = sorted(((n, t) for n, t in table.items()
+                         if t.get("team_share") is not None),
+                        key=lambda kv: kv[1]["team_share"])
+        if len(ranked) > 1:
+            lines.append("- Everyone's team-flash share, for scale: " + ", ".join(
+                f"{n} {t['team_share'] * 100:.0f}%" for n, t in ranked))
+    lines.append(f"- {prof['note']}")
+    return lines
+
+
 def _economy_lines(prof):
     """Match totals. Sums of prices, so no significance test applies."""
     if not prof or not prof.get("deaths_priced"):
@@ -319,6 +359,7 @@ def build_facts(a, match, role=None):
 
     lines += _duel_lines(a.get("duel_profile"))
     lines += _economy_lines(a.get("economy"))
+    lines += _flash_lines(a.get("flashes"), a.get("flash_table"))
 
     lines += ["", "TOTALS",
               f"- untraded deaths: {t['untraded']} of {t['deaths']}",

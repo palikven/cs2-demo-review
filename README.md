@@ -18,6 +18,7 @@ cs2coach/
     coach.py          # analysis -> per-death verdicts and fixes            (Claude)
     narrate.py        # stats    -> plain-language team review              (Claude)
     economy.py        # round buys, and what a death costs in guns
+    flashes.py        # who each flash blinded - self, team or enemy
     prices.py         # the buy-menu price table (no heavy imports)
     roles.py          # role evidence + what each role is judged on
     gates.py          # "is this signal strong enough to say out loud?"
@@ -30,7 +31,7 @@ cs2coach/
     map_calibration.json
   radars/             # radar images for the Active Duty maps
   data/               # parsed match JSONs land here
-  tests/              # 411 tests
+  tests/              # 428 tests
 ```
 
 ## One-time setup
@@ -294,6 +295,42 @@ compared against it — only against a full buy on the same scale.
 
 ```bash
 python parser/economy.py data/2v5.json    # round buys + what your deaths cost
+```
+
+**Flashes — who you actually blinded.** `flashbang_detonate` says a flash went
+off; `player_blind` says who it caught and for how long, which is the only part
+worth coaching. Every blind is tagged self / team / enemy, and the panel ranks
+all ten players so your number has a scale attached:
+
+```
+iTrix_        70% of 10
+Arvend11      64% of 11
+pavloven      46% of 24     <- you
+RENAT4IK      13% of 23
+```
+
+"You team-flash" is nagging. "You throw the second-most flashes in the match and
+46% of the meaningful ones blind your own side, against RENAT4IK's 13%" is a
+habit with a benchmark — in this match seven of them landed on Domin0r, twice
+for nearly five seconds.
+
+Sides are resolved from the position frame at that tick, not from names: sides
+swap at half time, so a name-keyed check gets every second-half verdict
+backwards and still returns a clean-looking answer.
+
+Nothing here is scored. One flashbang blinds everyone in front of it — at tick
+43950 a single pop blinded an enemy who was immediately killed *and* a teammate
+for 4.95s, so any single verdict for that flash is wrong. Follow-up kills are
+reported as a count and deliberately not as a success rate: a flash that stops
+an angle being held worked whether or not anything died. Flashes that caught
+nobody aren't in `player_blind` at all, so this can't tell you about those.
+
+Smokes and molotovs get no such judgement — the demo carries counts and
+positions but nothing about whether one landed usefully, and the fact sheet says
+so rather than letting the model fill the gap.
+
+```bash
+python parser/flashes.py data/2v5.json    # every player's flash record
 ```
 
 **Rating:** HLTV Rating 1.0 and KAST per player, shown next to each name and in

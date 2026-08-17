@@ -216,6 +216,40 @@ def parse_utility(dem, round_rows, side_by_round, tickrate=64):
                 ev["side"] = r.get("user_side")
             util[out_key].append(ev)
 
+    # ---- who each flash actually blinded ----
+    # flashbang_detonate says a flash went off; player_blind says who it caught
+    # and for how long, which is the only part worth coaching. Sides are NOT
+    # resolved here - the event carries no team, and looking it up needs the
+    # frames, so flashes.py does it from position data instead of guessing.
+    #
+    # awpy surfaces 20 events and player_blind is not among them, so this goes
+    # to the demoparser2 instance awpy is already holding - a second
+    # DemoParser() would re-read the whole file for one table.
+    blinds = []
+    bdf = events.get("player_blind")
+    if bdf is None:
+        inner = getattr(dem, "parser", None)
+        if inner is not None:
+            try:
+                raw = inner.parse_event("player_blind")
+                if raw is not None and len(raw):
+                    bdf = pl.from_pandas(raw)
+            except Exception as exc:                       # noqa: BLE001
+                print(f"[!] player_blind unavailable ({exc}); flash coaching "
+                      f"will be skipped", file=sys.stderr)
+    if bdf is not None and bdf.height:
+        for r in to_dicts(bdf):
+            dur = r.get("blind_duration")
+            if dur is None or r.get("attacker_name") is None:
+                continue
+            blinds.append({
+                "t": int(r["tick"]),
+                "by": r["attacker_name"],
+                "who": r.get("user_name"),
+                "d": round(float(dur), 2),
+                "r": r.get("round_num") or round_of(r.get("tick"), round_rows),
+            })
+
     # ---- bomb ----
     bdf = getattr(dem, "bomb", None)
     if bdf is not None and bdf.height:
@@ -273,6 +307,7 @@ def parse_utility(dem, round_rows, side_by_round, tickrate=64):
                 })
             util["throws"].sort(key=lambda t: t["s"])
 
+    util["blinds"] = blinds
     counts = ", ".join(f"{k} {len(v)}" for k, v in util.items() if v)
     print(f"[*] Utility: {counts or 'none found'}, bomb events {len(bomb_events)}")
     return util, bomb_events

@@ -93,6 +93,11 @@
   .vrow .vdot{width:8px;height:8px;border-radius:50%;background:var(--ink-faint);
               transition:background .12s,box-shadow .12s}
   /* a talking player lights up; this is the only moving part of the panel */
+  .vrow.me{background:var(--panel-2)}
+  .fbar{width:8px;height:20px;border-radius:2px;background:var(--ok);
+        overflow:hidden;display:block;position:relative}
+  .fbar i{position:absolute;left:0;bottom:0;width:100%;height:0;
+          background:var(--danger);display:block}
   .vrow.talking{border-left-color:var(--accent)}
   .vrow.talking .vdot{background:var(--accent);box-shadow:0 0 7px var(--accent)}
   .vrow.talking .nm{color:var(--ink)}
@@ -342,6 +347,12 @@
       <div class="wp-lbl"><span id="wp-t" class="t"></span><span id="wp-ct" class="ct"></span></div>
     </div>
     <div id="teams"></div>
+    <div id="flash-wrap" style="display:none">
+      <div class="rail-h">Flashes <span id="flash-sum" class="vsum"></span></div>
+      <div id="flash-list"></div>
+      <div class="vhint">blinds of 0.7s+ — one flash can catch both sides</div>
+    </div>
+
     <div class="rail-h">Selected player</div>
     <div class="statgrid" id="statgrid"></div>
     <div class="legend" style="margin-top:18px">
@@ -484,7 +495,7 @@ async function loadMatch(data){
 function loadSidecars(name){
   fetch(`../data/${name}_analysis.json`).then(r=>r.ok?r.json():null).catch(()=>null)
     .then(a=>{ if(a){
-      ANALYSIS=a; coachKey=null; buildRounds();
+      ANALYSIS=a; coachKey=null; buildRounds(); buildFlashPanel();
       // The stat panel and the team rows are built before this arrives, and
       // both read swing out of it - without re-rendering them the swing tile
       // shows a dash for the whole session.
@@ -1208,6 +1219,43 @@ function loadoutOf(p){
 function itemIcon(item, cls){
   const f=ITEM_ICONS[item];
   return f?`<img class="${cls}" src="icons/${f}.svg" alt="${esc(item)}" title="${esc(item)}">`:"";
+}
+
+// ---- flashes ----
+// Ranked by team-flash share, everyone in the match, because one player's
+// number means nothing on its own. Bars are split enemy|team rather than one
+// colour: a single flash can blind both sides, so there's no one score to draw.
+function buildFlashPanel(){
+  const wrap=$("#flash-wrap");
+  const table=(ANALYSIS && ANALYSIS.flash_table) || null;
+  const rows=table ? Object.entries(table)
+    .filter(([,t])=>t.team_share!==null && t.team_share!==undefined)
+    .sort((a,b)=>b[1].team_share-a[1].team_share) : [];
+  if(!rows.length){ wrap.style.display="none"; return; }
+
+  // ANALYSIS.player is who the review is about; M.pov is who the demo was
+  // parsed for. They agree today, but the analysis is the authority on whose
+  // numbers these are.
+  const pov=(ANALYSIS && ANALYSIS.player) || (M && M.pov);
+  const mine=table[pov];
+  const sum = mine && mine.team_share!=null
+    ? `you ${Math.round(mine.team_share*100)}% on your own team`
+    : `${rows.length} players`;
+  const html = rows.map(([n,t])=>{
+    const pct=Math.round(t.team_share*100), tot=t.enemy_meaningful+t.team_meaningful;
+    return `<div class="vrow${n===pov?" me":""}" title="${esc(n)}: ${t.enemy_meaningful} enemy (${t.enemy_seconds}s), ${t.team_meaningful} team (${t.team_seconds}s)">
+      <span class="fbar"><i style="height:${pct}%"></i></span>
+      <span class="nm">${esc(n)}</span>
+      <span class="kd">${pct}% of ${tot}</span>
+    </div>`;
+  }).join("");
+
+  // Content first, then reveal. Setting display up front leaves an empty box
+  // on screen if anything below throws - which is exactly what happened when
+  // this read an undefined POV.
+  $("#flash-sum").textContent=sum;
+  $("#flash-list").innerHTML=html;
+  wrap.style.display="";
 }
 
 // ---- voice UI ----

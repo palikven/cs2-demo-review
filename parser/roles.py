@@ -90,9 +90,13 @@ ROLE_GUIDANCE = {
         "happened (support that is out of trade range is not support), and "
         "whether their deaths were traded. Do not judge them on opening duels, "
         "kill counts or rating - a support with a 0.9 rating whose team wins "
-        "the rounds they set up is doing the job. Utility counts are in the "
-        "sheet but the demo cannot tell you whether a smoke landed usefully, "
-        "so do not claim it did or did not."
+        "the rounds they set up is doing the job. Flashes ARE judgeable and "
+        "matter most for this role: the sheet says who each of their flashes "
+        "blinded and for how long, with everyone else's team-flash share for "
+        "scale - a support who blinds their own entry is actively costing "
+        "rounds. Smokes and molotovs are not: the demo carries counts and "
+        "positions but nothing about whether one landed usefully, so do not "
+        "claim it did or did not."
     ),
     "anchor": (
         "This player is an ANCHOR holding a site alone on CT. Their job is "
