@@ -134,6 +134,8 @@
     border:1px solid var(--line);border-radius:3px;padding:2px 5px;color:var(--ink-dim)}
   .tag.bad{border-color:var(--danger);color:var(--danger)}
   .tag.warn{border-color:var(--t);color:var(--t)}
+  /* running into a duel - you cannot shoot accurately above ~140 u/s */
+  .card .ln b.warn{color:var(--t)}
   .tip{border-left:2px solid var(--accent);padding-left:8px;margin-top:8px;font-size:12.5px;line-height:1.45}
   .tip .vd{color:var(--ink-dim);margin-bottom:4px}
   /* coach chat - a slide-over, so the transcript has room the rail doesn't have */
@@ -1510,6 +1512,32 @@ function tagsFor(d){
   return t;
 }
 
+// How the duel was approached: were they moving, and who covered the ground.
+// The measurement is a ~0.5s average ending up to 0.5s before the kill, so the
+// wording says "into it" rather than "at death" - the title spells that out
+// because a reader who takes it as the instant of death is reading it wrong.
+function approachLine(d){
+  if(!d.motion && !d.closed_by) return "";
+  const bits=[];
+  if(d.motion){
+    // "standing still" stands alone; the other two take "into it", because
+    // "still into it" is not a sentence.
+    const phrase={static:["standing still",""],
+                  walking:["moving"," into it"],
+                  running:["running"," into it"]}[d.motion];
+    bits.push(`<b class="${d.motion==='running'?'warn':''}">${phrase[0]}</b>${phrase[1]}`
+      + (d.speed!=null?` (${Math.round(d.speed)} u/s)`:""));
+  }
+  if(d.closed_by==="victim")        bits.push(`you closed <b>${Math.round(d.victim_closed)}u</b>`);
+  else if(d.closed_by==="attacker") bits.push(`they closed <b>${Math.round(d.attacker_closed)}u</b>`);
+  else if(d.closed_by==="mutual")   bits.push(`both closed in`);
+  else if(d.closed_by==="neither")  bits.push(`neither crossed ground`);
+  if(!bits.length) return "";
+  const lag=d.lag_s!=null?` Sampled ${d.lag_s.toFixed(1)}s before the kill.`:"";
+  return ` <span title="Average over the ~0.5s approaching the duel, not the instant of death.${lag}"
+    style="color:var(--ink-faint)">· ${bits.join(" · ")}</span>`;
+}
+
 function deathCard(d, live){
   const tip = (COACH?.deaths||[]).find(x=>x.round===d.round && x.tick===d.tick);
   const mate = d.nearest_mate!=null
@@ -1528,7 +1556,7 @@ function deathCard(d, live){
     <div class="where">${esc(calloutLabel(d.victim_place||"?"))}
       <i>&lt;-</i> ${esc(calloutLabel(d.attacker_place||"?"))}
       <i>·</i> ${esc(d.weapon||"?")}</div>
-    <div class="ln" style="margin-top:6px;color:var(--ink-dim)">${mate}</div>
+    <div class="ln" style="margin-top:6px;color:var(--ink-dim)">${mate}${approachLine(d)}</div>
     <div class="tags">${tagsFor(d).map(([txt,cls])=>
       `<span class="tag ${cls}">${esc(txt)}</span>`).join("")}</div>
     ${tip?`<div class="tip"><div class="vd">${esc(tip.verdict)}</div>${esc(tip.tip)}</div>`:""}
@@ -1706,6 +1734,13 @@ function renderChips(){
   const near=(ANALYSIS?.deaths||[]).find(d=>t!=null && Math.abs(d.tick-t)<640);
   if(near){
     qs=["What did I do wrong here?"];
+    // Only offer the fight-choice question when the demo shows they actually
+    // walked into it. Asking "should I have taken this fight" about a death
+    // where neither player crossed ground is a prompt with nothing behind it.
+    if(near.closed_by==="victim"||near.closed_by==="mutual")
+      qs.push("Should I have taken this fight at all?");
+    else if(near.motion==="static"&&near.closed_by==="attacker")
+      qs.push("They came to me and I still lost it — why?");
     if(near.swing_cost_pct>=15)
       qs.push(`Why did this cost ${Math.round(near.swing_cost_pct)}%?`);
     if(near.victim_place)

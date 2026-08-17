@@ -14,6 +14,7 @@ cs2coach/
   parser/
     parse_demo.py     # .dem -> compact JSON (positions + callouts + events + stats)
     analyze.py        # positions -> where you die, who from, how isolated  (no AI)
+    duels.py          # movement and ground closed in the seconds before a duel
     coach.py          # analysis -> per-death verdicts and fixes            (Claude)
     narrate.py        # stats    -> plain-language team review              (Claude)
     gates.py          # "is this signal strong enough to say out loud?"
@@ -26,7 +27,7 @@ cs2coach/
     map_calibration.json
   radars/             # radar images for the Active Duty maps
   data/               # parsed match JSONs land here
-  tests/              # 321 tests
+  tests/              # 367 tests
 ```
 
 ## One-time setup
@@ -144,13 +145,13 @@ Two blocks, and the order is load-bearing:
 
 | | contents | cached |
 |---|---|---|
-| **stable** | system prompt, your rating / KAST / ADR / swing, every death with the callout you died in and the one you were killed from, hotspots, spacing, the team scoreboard, round-by-round results | **yes** |
+| **stable** | system prompt, your rating / KAST / ADR / swing, every death with the callout you died in, the one you were killed from and how you entered the duel, hotspots, spacing, the team scoreboard, round-by-round results | **yes** |
 | **volatile** | the tick you're paused at, then the conversation, then the question |  no |
 
 Caching is a prefix match, so stable content has to come first and be
 byte-identical across turns — the brief is built once per match and reused. It's
-~1,075 tokens on a real match, over the 512 minimum, so every follow-up reads it
-back at roughly a tenth of the price instead of paying for it again.
+~2,500 tokens on a real match, well over the 512 minimum, so every follow-up
+reads it back at roughly a tenth of the price instead of paying for it again.
 
 The enemy-blindness rule below applies here too, and is the reason the answers
 are worth anything: the coach gets what *you* knew at that tick, plus what the
@@ -204,6 +205,30 @@ post-plant · weapon, range, and whether it came through smoke or a wall
 
 **Rolled up:** where you keep dying and from which angles · deaths by round
 phase · how isolated you are when you die versus when you win
+
+**How you enter duels.** For every kill and death, from the position samples in
+the seconds before it: how fast you were moving, and how much ground each side
+covered *toward the other* — measured against where the other player started,
+which is what separates "you walked into this" from "they ran you down". A death
+card reads `running into it (186 u/s) · you closed 314u`.
+
+Two things it deliberately does not say. It is not called *peeking*: crossing
+into a sightline is a visibility question and there is no occlusion data here,
+so it reports ground closed, which is arithmetic. And it carries its own lag —
+the sample is a ~0.5s average ending up to 0.5s before the kill, so "standing
+still" means during the approach, not at the instant of death. Hover the line
+and the tooltip says exactly how stale it is.
+
+The per-duel numbers are always stated. The *pattern* is gated: on the bundled
+demo the POV dies at 39 u/s against a lobby median of 75, which looks like a
+finding and does not survive a permutation test (p≈0.20 on 16 deaths, and the
+sign of the comparison flips with the window size). So the fact sheet prints
+`[NOT A PATTERN]` and tells the model in words not to say this player "tends to"
+anything. It earns the claim across a season, not one match.
+
+```bash
+python parser/duels.py data/2v5.json      # every duel you lost, and the test
+```
 
 **Rating:** HLTV Rating 1.0 and KAST per player, shown next to each name and in
 the selected-player panel. Rating 1.0 is HLTV's published formula, so the number

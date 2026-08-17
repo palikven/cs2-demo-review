@@ -197,6 +197,14 @@ class Handler(SimpleHTTPRequestHandler):
         # may seek without having to probe first.
         if self.path.startswith("/data/voice/"):
             self.send_header("Accept-Ranges", "bytes")
+        # Parser output is rewritten in place by re-running the pipeline, at the
+        # same URL and often within the same second. SimpleHTTPRequestHandler
+        # sends Last-Modified and no Cache-Control, which lets the browser serve
+        # its copy without revalidating - so you re-parse a demo, reload, and
+        # study numbers that are one run out of date with nothing to indicate
+        # it. The viewer and its assets are edited just as often; the whole
+        # thing is a localhost dev server, so nothing here is worth caching.
+        self.send_header("Cache-Control", "no-cache, must-revalidate")
         super().end_headers()
 
     def do_GET(self):

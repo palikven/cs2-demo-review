@@ -81,6 +81,77 @@ def _place(p):
     return p or "an unnamed area"
 
 
+_MOTION_WORDS = {
+    "static": "you were standing still",
+    "walking": "you were moving",
+    "running": "you were at full running speed",
+}
+_CLOSED_WORDS = {
+    "victim": "you closed the ground into this duel",
+    "attacker": "they closed the ground onto you",
+    "mutual": "you both walked into it",
+    "neither": "neither of you crossed ground - this was a sightline you were "
+               "both already in",
+}
+
+
+def _approach_tags(d):
+    """
+    How the duel was approached, in words, with the measurement's limits in it.
+
+    The lag matters enough to state: the sample ends up to half a second before
+    the kill, so "standing still" means during the approach, not at the instant
+    of death. A model told the first will happily assert the second.
+    """
+    out = []
+    if d.get("motion") and d.get("speed") is not None:
+        lag = d.get("lag_s")
+        window = (f" in the half-second before it (sampled {lag:.1f}s early)"
+                  if lag is not None else " in the half-second before it")
+        out.append(f"{_MOTION_WORDS[d['motion']]} at {d['speed']:.0f} u/s{window}")
+    if d.get("motion_other"):
+        out.append(f"the attacker was {d['motion_other']}")
+    if d.get("closed_by"):
+        detail = ""
+        if d.get("gap_start") is not None and d.get("victim_closed") is not None:
+            detail = (f" (gap {d['gap_start']:.0f}u; you closed "
+                      f"{d['victim_closed']:+.0f}u, they closed "
+                      f"{d.get('attacker_closed', 0):+.0f}u)")
+        out.append(_CLOSED_WORDS[d["closed_by"]] + detail)
+    return out
+
+
+def _duel_lines(prof):
+    """The aggregate, which usually amounts to 'do not generalise from this'."""
+    if not prof or not prof.get("deaths_measured"):
+        return []
+    lines = ["", "HOW THIS PLAYER ENTERS DUELS (movement in the ~0.5s before each)"]
+    lines.append(
+        f"- Median speed when dying: {prof['speed_at_death']:.0f} u/s. "
+        f"When getting a kill: {prof['speed_at_kill']:.0f} u/s. "
+        f"Everyone else in this match dies at "
+        f"{prof['lobby_speed_at_death']:.0f} u/s. "
+        f"(Running is ~215 u/s with a rifle; you cannot shoot accurately above "
+        f"~140.)")
+    if prof.get("approaches_measured"):
+        lines.append(
+            f"- {prof['closed_into_death']} of {prof['approaches_measured']} "
+            f"deaths came after this player closed ground into the duel. The "
+            f"rest happened across a sightline they were already in.")
+    if prof.get("claimable"):
+        lines.append(f"- [NOTABLE] {prof['note']} "
+                     f"(p={prof['p_vs_lobby']}, n={prof['deaths_measured']}). "
+                     f"This one is strong enough to state as a habit.")
+    else:
+        lines.append(
+            f"- [NOT A PATTERN] {prof['note']} The difference above tests at "
+            f"p={prof['p_vs_lobby']} on {prof['deaths_measured']} deaths, which "
+            f"is not enough to separate it from chance. Cite individual duels by "
+            f"tick; do NOT say this player 'always' or 'tends to' die moving or "
+            f"standing.")
+    return lines
+
+
 def build_facts(a, match):
     """
     Flatten the analysis into an unambiguous text fact sheet.
@@ -156,6 +227,7 @@ def build_facts(a, match):
                            ("air", "the attacker was airborne")):
             if d.get(flag):
                 tags.append(text)
+        tags += _approach_tags(d)
         lines.append(" ".join(bits) + " | " + "; ".join(tags))
 
     lines += ["", "WHERE THIS PLAYER DIES (rolled up across the match)"]
@@ -192,6 +264,8 @@ def build_facts(a, match):
         lines.append("- NOTE: this player is no more isolated when dying than when "
                      "winning duels. Spacing is not the problem in this match; do not "
                      "claim it is.")
+
+    lines += _duel_lines(a.get("duel_profile"))
 
     lines += ["", "TOTALS",
               f"- untraded deaths: {t['untraded']} of {t['deaths']}",

@@ -544,6 +544,18 @@ def analyze(match, player=None):
         # rest of the analysis.
         print(f"[!] swing unavailable ({exc}); continuing without it", file=sys.stderr)
 
+    # How each duel was approached - was the player moving, and who closed the
+    # ground. Same failure policy as swing: a review without it is still a
+    # review, so a broken duel model must not take the rest down with it.
+    duel_profile = {}
+    try:
+        import duels as duelsmod
+        duelsmod.annotate(match, deaths, kills, name)
+        duel_profile = duelsmod.profile(match, name)
+    except Exception as exc:                       # noqa: BLE001
+        print(f"[!] duel approach unavailable ({exc}); continuing without it",
+              file=sys.stderr)
+
     for d in deaths:
         s = swing_by_tick.get(d["tick"])
         if s:
@@ -571,6 +583,7 @@ def analyze(match, player=None):
         "death_hotspots": hotspots,
         "phase_profile": phase_profile(deaths),
         "isolation_profile": isolation_profile(deaths, kills),
+        "duel_profile": duel_profile,
         "totals": {
             "deaths": total_deaths,
             "untraded": sum(1 for d in deaths if not d["traded"]),

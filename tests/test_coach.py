@@ -228,3 +228,87 @@ class TestPayload:
         assert payload["player"] == analysed["player"]
         assert payload["deaths"][0]["tick"] == 2
         assert payload["model"] == "claude-opus-5"
+
+
+# ---------------------------------------------------------------------------
+class TestApproachInTheFactSheet:
+    """
+    How the duel was entered, written into the sheet.
+
+    The risk here is not a missing number, it is a number stated more
+    confidently than it was measured. The sample is a ~0.5s average ending up
+    to 0.5s before the kill; a sheet that says "standing still" without saying
+    when will be read as "standing still at the moment of death", and the
+    advice that follows is about a moment nobody measured.
+    """
+
+    def test_a_death_carries_its_speed_and_who_closed(self, coach_mod):
+        tags = coach_mod._approach_tags({
+            "motion": "running", "speed": 186.0, "lag_s": 0.4,
+            "motion_other": "static", "closed_by": "victim",
+            "gap_start": 1029.0, "victim_closed": 314.0, "attacker_closed": 114.0,
+        })
+        joined = " ".join(tags)
+        assert "186" in joined
+        assert "closed the ground into this duel" in joined
+        assert "+314" in joined and "1029" in joined
+
+    def test_it_states_how_stale_the_sample_is(self, coach_mod):
+        tags = coach_mod._approach_tags({"motion": "static", "speed": 12.0,
+                                         "lag_s": 0.4})
+        joined = " ".join(tags)
+        assert "0.4s early" in joined, \
+            "without the lag this reads as the instant of death"
+
+    def test_an_unmeasured_duel_says_nothing(self, coach_mod):
+        """Silence, not a default. 'Standing still' about an unmeasured duel is a lie."""
+        assert coach_mod._approach_tags({"round": 3, "tick": 99}) == []
+
+    def test_a_sightline_duel_is_named_as_one(self, coach_mod):
+        tags = coach_mod._approach_tags({"closed_by": "neither",
+                                         "gap_start": 900.0,
+                                         "victim_closed": 3.0,
+                                         "attacker_closed": -1.0})
+        assert "already in" in " ".join(tags)
+
+    def test_the_real_match_sheet_forbids_generalising(self, coach_mod, analysed,
+                                                       real_match):
+        """
+        On one match the movement difference does not survive a permutation
+        test, and the sheet has to say so in words the model cannot read past.
+        If this ever flips to NOTABLE on the fixture, the gate was loosened.
+        """
+        sheet = coach_mod.build_facts(analysed, real_match)
+        assert "HOW THIS PLAYER ENTERS DUELS" in sheet
+        assert "[NOT A PATTERN]" in sheet
+        assert "do NOT say" in sheet
+
+    def test_the_aggregate_reports_the_lobby_baseline_too(self, coach_mod,
+                                                          analysed, real_match):
+        """A speed with nothing to compare it against is not a fact about anyone."""
+        sheet = coach_mod.build_facts(analysed, real_match)
+        line = next(l for l in sheet.splitlines()
+                    if l.startswith("- Median speed when dying"))
+        assert "Everyone else in this match" in line
+
+    def test_a_claimable_profile_is_marked_notable(self, coach_mod, analysed):
+        """
+        The refusal has to be conditional. Swap in a profile that did clear the
+        test and the sheet must say so - otherwise the gate is a hard-coded no.
+        """
+        a = dict(analysed)
+        a["duel_profile"] = {
+            "deaths_measured": 40, "kills_measured": 40,
+            "speed_at_death": 190.0, "speed_at_kill": 30.0,
+            "lobby_speed_at_death": 40.0, "p_vs_lobby": 0.001,
+            "closed_into_death": 30, "approaches_measured": 40,
+            "claimable": True, "note": "The speed difference is significant.",
+        }
+        sheet = coach_mod.build_facts(a, {})
+        assert "[NOTABLE]" in sheet
+        assert "[NOT A PATTERN]" not in sheet
+
+    def test_no_profile_adds_no_section(self, coach_mod, analysed):
+        a = dict(analysed)
+        a["duel_profile"] = {}
+        assert "HOW THIS PLAYER ENTERS DUELS" not in coach_mod.build_facts(a, {})

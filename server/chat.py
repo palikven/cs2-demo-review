@@ -220,28 +220,3 @@ def build_request(match, match_name, *, player, tick, question, history=None,
                    f"{_clip(question.strip(), MAX_QUESTION)}",
     })
     return system_blocks, messages
-
-
-def suggested_questions(analysis, tick):
-    """
-    Seeds for the chat's chips. Built from the player's own data so they point
-    at something real rather than being decorative.
-    """
-    out = ["What should I change about how I'm playing this map?"]
-    if not analysis:
-        return out
-    near = None
-    for d in analysis.get("deaths") or []:
-        if tick is not None and abs(d.get("tick", 0) - tick) < 640:
-            near = d
-            break
-    if near:
-        out.insert(0, "What did I do wrong here?")
-        if near.get("swing_cost_pct", 0) >= 15:
-            out.insert(1, f"Why did this death cost {near['swing_cost_pct']:.0f}%?")
-        if near.get("victim_place"):
-            out.append(f"Where should I have peeked instead of {near['victim_place']}?")
-    hot = [h for h in (analysis.get("death_places") or []) if h.get("notable")]
-    if hot:
-        out.append(f"Why do I keep dying in {hot[0]['place']}?")
-    return out[:4]
