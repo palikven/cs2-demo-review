@@ -48,6 +48,27 @@ Python ≥ 3.11 required (awpy needs it).
 
 ## Use it
 
+**One command.** Everything below in the right order, skipping any stage whose
+output is already current:
+
+```bash
+python review.py path/to/match.dem --pov "YourFaceitName"
+```
+
+Measured on a 354 MB FACEIT demo: **~15–27s total**, of which 12–24s is the
+parse (the spread is disk cache — the demo is 354 MB). Then ~1.4s to open the
+viewer. Re-running when nothing changed is 0.0s.
+
+```
+parse_demo   .dem -> match.json     12.0s
+voice        comms -> opus           1.3s
+analyze      -> death review         1.3s
+career       pool every demo         0.6s
+total                               15.2s
+```
+
+The stages individually, if you want them:
+
 **1. Parse a demo.** Download a match `.dem` from FACEIT, then:
 ```bash
 python parser/parse_demo.py path/to/match.dem --pov "YourFaceitName"

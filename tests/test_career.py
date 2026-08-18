@@ -326,3 +326,98 @@ class TestChatIntegration:
                 for i in range(4)]
         text = "\n".join(coach.career_lines(career.career(rows, "111")))
         assert "Do NOT name one anyway" in text
+
+
+class TestAnalysisSidecar:
+    """
+    career reads `_analysis.json` instead of re-analysing: 47 KB against a
+    5.1 MB match, and 10.7s -> 0.7s across eight demos. That shortcut is only
+    safe because of three checks, and every one of them fails SILENTLY when
+    removed - you get a complete, plausible career built from the wrong numbers.
+    """
+
+    def _pair(self, tmp_path, player="pav", deaths=("Main",)):
+        import json
+        match = tmp_path / "m.json"
+        match.write_text(json.dumps({
+            "players": [{"name": "pav", "steamid": "111"},
+                        {"name": "other", "steamid": "222"}],
+            "rounds": [], "frames": [], "kills": [],
+        }), encoding="utf-8")
+        side = tmp_path / "m_analysis.json"
+        side.write_text(json.dumps({
+            "player": player,
+            "deaths": [{"victim_place": p, "tick": i}
+                       for i, p in enumerate(deaths)],
+        }), encoding="utf-8")
+        return match, side
+
+    def test_a_current_sidecar_is_used(self, tmp_path):
+        import os
+        import time
+        match, side = self._pair(tmp_path)
+        t = time.time()
+        os.utime(match, (t, t)); os.utime(side, (t + 1, t + 1))
+        a, src = career.analysis_for(match, "pav")
+        assert src == "sidecar"
+        assert len(a["deaths"]) == 1
+
+    def test_a_sidecar_older_than_the_match_is_not_trusted(self, tmp_path):
+        """
+        The demo was re-parsed after the sheet was written, so the sheet
+        describes a match that is no longer on disk. Used anyway, you review
+        the previous parse and nothing anywhere says so.
+        """
+        import os
+        import time
+        match, side = self._pair(tmp_path)
+        t = time.time()
+        os.utime(side, (t - 100, t - 100)); os.utime(match, (t, t))
+        _, src = career.analysis_for(match, "pav")
+        assert src == "computed", "a stale sheet was served as current"
+
+    def test_a_sidecar_for_a_different_player_is_not_used(self, tmp_path):
+        """
+        The analysis is per-POV. A sheet built for one player answers for them
+        and nobody else, and the deaths in it belong to the wrong person.
+        """
+        import os
+        import time
+        match, side = self._pair(tmp_path, player="other")
+        t = time.time()
+        os.utime(match, (t, t)); os.utime(side, (t + 1, t + 1))
+        _, src = career.analysis_for(match, "pav")
+        assert src == "computed", "one player's review was served for another"
+
+    def test_a_corrupt_sidecar_falls_back_rather_than_raising(self, tmp_path):
+        import os
+        import time
+        match, side = self._pair(tmp_path)
+        side.write_text("{not json", encoding="utf-8")
+        t = time.time()
+        os.utime(match, (t, t)); os.utime(side, (t + 1, t + 1))
+        _, src = career.analysis_for(match, "pav")
+        assert src == "computed"
+
+    def test_a_sidecar_with_no_deaths_key_falls_back(self, tmp_path):
+        """
+        An empty or half-written sheet. `deaths` is what career pools, so a
+        sheet without it contributes zero deaths and silently drags every
+        pooled rate toward nothing.
+        """
+        import json
+        import os
+        import time
+        match, side = self._pair(tmp_path)
+        side.write_text(json.dumps({"player": "pav"}), encoding="utf-8")
+        t = time.time()
+        os.utime(match, (t, t)); os.utime(side, (t + 1, t + 1))
+        assert career.usable_sidecar(match, "pav") is None
+        _, src = career.analysis_for(match, "pav")
+        assert src == "computed"
+
+    def test_a_missing_sidecar_falls_back(self, tmp_path):
+        match, side = self._pair(tmp_path)
+        side.unlink()
+        _, src = career.analysis_for(match, "pav")
+        assert src == "computed"

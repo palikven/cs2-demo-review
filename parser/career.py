@@ -232,25 +232,112 @@ def _flash_total(a):
     return e + t
 
 
-def build(paths, steamid=None, name=None):
-    """Load, analyse and pool. Returns (career, [(label, analysis), ...])."""
+def usable_sidecar(path, player=None):
+    """
+    The `_analysis.json` beside `path`, or None if it cannot be trusted.
+
+    ONE implementation on purpose. This check had two copies for about ten
+    minutes - one here and one in build()'s fast path - and a mutation test
+    caught that only one of them was covered. Two copies of a silent-failure
+    guard is worse than none, because the tested one gives you confidence in
+    the untested one.
+
+    Pass `player` to require the sheet be for them; omit it to peek at whose it
+    is, which is how build() resolves identity without opening a 5 MB match.
+    """
+    path = Path(path)
+    side = path.with_name(path.stem + "_analysis.json")
+    if not side.exists() or side.stat().st_mtime < path.stat().st_mtime:
+        return None                    # missing, or the demo was re-parsed after
+    try:
+        a = json.loads(side.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None                    # unreadable sidecar is not fatal
+    if a.get("deaths") is None:
+        return None
+    if player is not None and a.get("player") != player:
+        return None                    # per-POV: one player's sheet is not another's
+    return a
+
+
+def analysis_for(path, player, match=None):
+    """
+    One match's analysis, from its `_analysis.json` sidecar when that is usable.
+
+    WHY THIS IS NOT JUST analyze.analyze(): the sidecar is 47 KB and the match
+    it came from is 5.1 MB. Re-analysing costs about a second per match AND
+    reads the whole match file, so pooling twenty demos meant loading 100 MB and
+    burning half a minute - every time a single new demo was added. The sidecar
+    already holds everything career() reads, and `analyze.py --emit` already
+    writes it.
+
+    Three things make a sidecar unusable, and all three are checked rather than
+    hoped for:
+
+      * it is for a DIFFERENT player. The analysis is per-POV; a sheet built for
+        one player cannot answer for another.
+      * it is OLDER than the match file, so the demo was re-parsed after it was
+        written and the numbers no longer describe what is on disk.
+      * it is missing or unreadable.
+
+    Any of those and it falls back to analysing from the match, which is always
+    correct and merely slow.
+    """
+    a = usable_sidecar(path, player)
+    if a is not None:
+        return a, "sidecar"
+    import analyze
+    if match is None:
+        match = analyze.load_match(path)
+    return analyze.analyze(match, player), "computed"
+
+
+def build(paths, steamid=None, name=None, verbose=False):
+    """
+    Load, pool, and report where each match's numbers came from.
+
+    Matches are only fully LOADED when their sidecar cannot be used - the
+    identity check needs the player list, which the sidecar carries as `player`,
+    so a usable sidecar avoids the 5 MB read entirely.
+    """
     import analyze
 
-    rows, resolved = [], None
+    rows, resolved, computed = [], None, 0
     for p in paths:
-        match = analyze.load_match(p)
-        who = identify(match, steamid, name)
-        if not who:
-            continue
-        resolved = resolved or who
-        a = analyze.analyze(match, who[1])
-        # The flash denominator is derived, so attach it where career() looks.
+        p = Path(p)
+
+        # Fast path: the sidecar names its own player, so identity can be
+        # resolved without opening the match at all.
+        a = None
+        cand = usable_sidecar(p)
+        if cand is not None:
+            who_name = cand.get("player")
+            if who_name and (name is None or who_name == name):
+                # A steamid query still needs the match to confirm the id,
+                # unless an earlier match already resolved it to this name.
+                if not steamid or (resolved and resolved[1] == who_name):
+                    a, resolved = cand, (resolved or (steamid or "", who_name))
+
+        if a is None:
+            match = analyze.load_match(p)
+            who = identify(match, steamid, name)
+            if not who:
+                continue
+            resolved = resolved or who
+            a, src = analysis_for(p, who[1], match)
+            if src == "computed":
+                computed += 1
+
         if a.get("flashes"):
             a["flashes"]["_flash_total"] = _flash_total(a)
         rows.append((p.stem, a))
+
+    if verbose:
+        print(f"[*] {len(rows)} match(es); {len(rows) - computed} read from "
+              f"_analysis.json, {computed} analysed from the match file")
     if not rows:
         return {}, []
-    return career(rows, resolved[0]), rows
+    return career(rows, resolved[0] if resolved[0] else "unknown"), rows
 
 
 CAREER_FILE = "career.json"
@@ -309,7 +396,7 @@ def main():
         return 1
     print(f"[*] {len(paths)} match(es): {', '.join(p.stem for p in paths)}")
 
-    c, rows = build(paths, args.steamid, args.player)
+    c, rows = build(paths, args.steamid, args.player, verbose=True)
     if not c:
         print("That player is not in any of them.")
         return 1
