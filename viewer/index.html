@@ -274,16 +274,28 @@
     border-top:1px solid var(--line);padding:9px 16px 11px;display:flex;
     flex-direction:column;gap:9px}
   .tl-row{display:flex;align-items:center;gap:12px}
-  .rounds{display:flex;gap:3px;flex:1;overflow-x:auto;padding-bottom:2px}
-  .rbtn{position:relative;min-width:30px;height:30px;border-radius:6px;border:1px solid var(--line);
-    background:var(--panel-2);color:var(--ink-faint);font-family:var(--mono);font-size:11px;
-    cursor:pointer;transition:all .13s ease;flex:0 0 auto;font-variant-numeric:tabular-nums}
+  /* One variable drives the whole button. Set --rsize and the label, the
+     win bar and the death dot all scale with it - a size control that only
+     changed the box would leave 11px text rattling around inside a 56px
+     square. */
+  .rounds{display:flex;gap:calc(var(--rsize) * .1);flex:1;overflow-x:auto;
+    padding-bottom:2px;--rsize:38px}
+  .rbtn{position:relative;min-width:var(--rsize);height:var(--rsize);
+    border-radius:calc(var(--rsize) * .18);border:1px solid var(--line);
+    background:var(--panel-2);color:var(--ink-faint);font-family:var(--mono);
+    font-size:calc(var(--rsize) * .36);
+    cursor:pointer;transition:background .13s ease,color .13s ease,
+      border-color .13s ease,transform .13s ease,box-shadow .13s ease;
+    flex:0 0 auto;font-variant-numeric:tabular-nums}
   .rbtn:hover{color:var(--ink);border-color:var(--line-2);transform:translateY(-1px)}
   /* The winner's colour as a base strip, so the row reads as a story of the
      match at a glance rather than as twenty-two identical buttons. */
-  .rbtn.t-win{box-shadow:inset 0 -3px 0 var(--t)}
-  .rbtn.ct-win{box-shadow:inset 0 -3px 0 var(--ct)}
-  .rbtn.flag:after{content:"";position:absolute;top:4px;right:4px;width:5px;height:5px;
+  .rbtn.t-win{box-shadow:inset 0 calc(var(--rsize) * -.09) 0 var(--t)}
+  .rbtn.ct-win{box-shadow:inset 0 calc(var(--rsize) * -.09) 0 var(--ct)}
+  .rbtn.flag:after{content:"";position:absolute;
+    top:calc(var(--rsize) * .11);right:calc(var(--rsize) * .11);
+    width:calc(var(--rsize) * .16);height:calc(var(--rsize) * .16);
+    min-width:4px;min-height:4px;
     border-radius:50%;background:var(--danger);box-shadow:0 0 6px rgba(255,77,94,.8)}
   .rbtn.active{color:#07090d;background:var(--accent);border-color:var(--accent);
     font-weight:700;transform:translateY(-2px);box-shadow:var(--glow)}
@@ -305,6 +317,16 @@
   .clock{font-family:var(--mono);font-size:11px;color:var(--ink-faint);
     font-variant-numeric:tabular-nums;white-space:nowrap}
   .clock b{color:var(--ink)}
+  .sizer{display:flex;align-items:center;gap:2px;border:1px solid var(--line);
+    border-radius:7px;background:var(--panel-2);padding:2px}
+  .szb{width:22px;height:24px;border:0;background:none;color:var(--ink-dim);
+    font-family:var(--mono);font-size:13px;line-height:1;cursor:pointer;border-radius:5px;
+    transition:all .13s ease}
+  .szb:hover{background:var(--panel-3);color:var(--ink)}
+  .szb:disabled{opacity:.3;cursor:default}
+  .szb:disabled:hover{background:none;color:var(--ink-dim)}
+  .szv{font-family:var(--mono);font-size:10px;color:var(--ink-faint);min-width:18px;
+    text-align:center;font-variant-numeric:tabular-nums;user-select:none}
   .speed{font-family:var(--mono);font-size:11px;color:var(--ink-dim);cursor:pointer;
     user-select:none;padding:6px 10px;border:1px solid var(--line);border-radius:7px;
     background:var(--panel-2);transition:all .13s ease}
@@ -592,6 +614,13 @@
       <div class="scrub">
         <input type="range" id="seek" min="0" max="0" value="0" step="1">
         <div class="clock"><b id="c-cur">0</b> / <span id="c-max">0</span></div>
+      </div>
+      <!-- Round-button size. Persisted, because it is a comfort setting and
+           being asked to set it again on every reload is the whole problem. -->
+      <div class="sizer" title="Round button size ( [ and ] )">
+        <button class="szb" id="rsize-down" aria-label="Smaller round buttons">−</button>
+        <span class="szv" id="rsize-val">38</span>
+        <button class="szb" id="rsize-up" aria-label="Larger round buttons">+</button>
       </div>
       <div class="speed" id="speed">1×</div>
     </div>
@@ -2473,6 +2502,39 @@ function toggleUtility(){
   b.classList.toggle("off",!showUtility);
   dirty=true; draw();
 }
+// ---- round button size ------------------------------------------------------
+// A comfort setting, so it persists. The default was 30px and read as cramped;
+// 38 is the new floor of "comfortable" and the range goes well past it because
+// what counts as too small depends on the screen, not on taste.
+const RSIZE_MIN=24, RSIZE_MAX=72, RSIZE_STEP=4, RSIZE_DEFAULT=38;
+const RSIZE_KEY="cs2coach.roundSize";
+
+function roundSize(){
+  const v=parseInt(localStorage.getItem(RSIZE_KEY),10);
+  return Number.isFinite(v) ? Math.min(RSIZE_MAX,Math.max(RSIZE_MIN,v)) : RSIZE_DEFAULT;
+}
+
+function setRoundSize(px,{save=true}={}){
+  const v=Math.min(RSIZE_MAX,Math.max(RSIZE_MIN,px));
+  $("#rounds").style.setProperty("--rsize",v+"px");
+  const lbl=$("#rsize-val"); if(lbl) lbl.textContent=v;
+  const dn=$("#rsize-down"), up=$("#rsize-up");
+  if(dn) dn.disabled = v<=RSIZE_MIN;
+  if(up) up.disabled = v>=RSIZE_MAX;
+  if(save){ try{ localStorage.setItem(RSIZE_KEY,v); }catch(e){} }
+  // Keep the round you are watching in view: growing the buttons pushes the
+  // active one off the right of a 22-round strip.
+  const act=document.querySelector(".rbtn.active");
+  if(act) act.scrollIntoView({block:"nearest",inline:"nearest"});
+  return v;
+}
+
+function nudgeRoundSize(delta){ setRoundSize(roundSize()+delta); }
+
+if($("#rsize-down")) $("#rsize-down").onclick=()=>nudgeRoundSize(-RSIZE_STEP);
+if($("#rsize-up"))   $("#rsize-up").onclick=()=>nudgeRoundSize(+RSIZE_STEP);
+setRoundSize(roundSize(),{save:false});
+
 $("#toggle-callouts").onclick=toggleCallouts;
 $("#toggle-utility").onclick=toggleUtility;
 $("#toggle-voice").onclick=toggleVoice;
@@ -2486,6 +2548,10 @@ document.addEventListener("keydown",e=>{
   if(e.code==="KeyU"){e.preventDefault();toggleUtility();}
   if(e.code==="KeyV"){e.preventDefault();toggleVoice();}
   if(e.code==="KeyK"){e.preventDefault();toggleChat();}
+  // [ and ] resize the round strip. Matched to BracketLeft/Right by CODE, not
+  // key, so it still works on layouts where those characters need a modifier.
+  if(e.code==="BracketLeft"){e.preventDefault();nudgeRoundSize(-RSIZE_STEP);}
+  if(e.code==="BracketRight"){e.preventDefault();nudgeRoundSize(+RSIZE_STEP);}
 });
 // Esc closes the chat even from inside the textarea, where the handler above
 // bails out early so typing "space" doesn't pause playback.

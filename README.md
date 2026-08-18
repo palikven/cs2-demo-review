@@ -107,6 +107,7 @@ what happened; a round you survived says so.
 | `C` | callout labels on/off |
 | `U` | utility on/off |
 | `V` | voice comms on/off |
+| `[` `]` | round buttons smaller / bigger (or the `− +` control; it's remembered) |
 
 **Utility** draws smokes and molotovs as areas for exactly as long as they were
 actually up, flashes and HEs as brief pops where they went off, the flight path
