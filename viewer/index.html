@@ -5,272 +5,465 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Overwatch · CS2 Demo Review</title>
 <style>
+  /* ------------------------------------------------------------------ *
+   * BROADCAST HUD
+   *
+   * The old layout stacked seven panels in one scrolling rail, so nothing
+   * led: a -24% swing, a rating and a voice list all read at the same
+   * weight. This inverts that. The map is the hero, the moment you are
+   * paused on is a lower-third over it, and the rail is TABBED so exactly
+   * one thing competes for attention at a time.
+   *
+   * Colour carries meaning and nothing else: amber is T, blue is CT, red
+   * is loss, green is gain. Nothing decorative is coloured, because the
+   * moment it is, the side colours stop reading as sides.
+   * ------------------------------------------------------------------ */
   :root{
-    --bg:#0c0f14; --panel:#12161d; --panel-2:#171c25; --line:#232b38;
-    --ink:#e8edf4; --ink-dim:#8b98ab; --ink-faint:#5a6678;
-    --t:#e0a34a;       /* T side  */
-    --ct:#5aa9e6;      /* CT side */
-    --t-dead:#6b5330; --ct-dead:#33566e;
-    --accent:#4ade9b;  /* signature green - actions/alive pulse */
-    --danger:#ff5d5d;
+    --bg:#07090d; --panel:#0e1218; --panel-2:#141a23; --panel-3:#1a2130;
+    --line:#1e2634; --line-2:#2b3547;
+    --ink:#eef2f8; --ink-dim:#8fa0b8; --ink-faint:#5d6b80;
+    --t:#f0a83c;       /* T side  */
+    --ct:#4fa8f5;      /* CT side */
+    --t-dead:#6b5330; --ct-dead:#2d5170;
+    --accent:#3ee89a;  /* signature green - actions/alive pulse */
+    --danger:#ff4d5e;
+    --ok:#3ee89a;
+    --warn:#f0a83c;
     --mono:"SFMono-Regular",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
     --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --glow:0 0 0 1px rgba(62,232,154,.25), 0 0 24px -6px rgba(62,232,154,.5);
+    --r:10px;
   }
   *{box-sizing:border-box}
-  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--sans)}
-  body{display:grid;grid-template-columns:1fr 360px;grid-template-rows:auto 1fr auto;height:100vh;overflow:hidden}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    -webkit-font-smoothing:antialiased}
+  body{display:grid;grid-template-columns:1fr 366px;grid-template-rows:auto 1fr auto;
+    height:100vh;overflow:hidden}
+  ::selection{background:rgba(62,232,154,.28)}
 
+  /* Scrollbars styled because the rail is now a tabbed panel people live in. */
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:9px;
+    border:2px solid var(--panel)}
+  ::-webkit-scrollbar-thumb:hover{background:#3b4860}
+
+  /* ---------------- header: the broadcast score bar ---------------- */
   header{
-    grid-column:1/-1;display:flex;align-items:center;gap:20px;
-    padding:12px 20px;background:var(--panel);border-bottom:1px solid var(--line);
+    grid-column:1/-1;display:flex;align-items:center;gap:16px;position:relative;
+    padding:0 16px;height:56px;background:linear-gradient(180deg,#10151d,#0b0e14);
+    border-bottom:1px solid var(--line);
   }
-  .brand{font-family:var(--mono);font-weight:600;letter-spacing:.14em;font-size:13px;text-transform:uppercase}
+  header:after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;
+    background:linear-gradient(90deg,transparent,rgba(62,232,154,.5),transparent)}
+  .brand{font-family:var(--mono);font-weight:700;letter-spacing:.2em;font-size:12px;
+    text-transform:uppercase;color:var(--ink-dim);white-space:nowrap}
   .brand b{color:var(--accent)}
-  .meta{font-family:var(--mono);font-size:12px;color:var(--ink-dim);display:flex;gap:18px}
-  .meta span b{color:var(--ink)}
-  .loadbtn{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--ink-dim);
-    border:1px solid var(--line);background:var(--panel-2);padding:7px 12px;border-radius:6px;cursor:pointer}
-  .loadbtn:hover{border-color:var(--accent);color:var(--ink)}
 
-  /* stage */
-  main{position:relative;display:flex;align-items:center;justify-content:center;padding:16px;min-height:0;min-width:0;overflow:hidden}
+  /* The live scoreline, dead centre - where a broadcast puts it. Absolute so
+     it stays centred on the WINDOW regardless of how wide the meta block or
+     the button row happen to be. */
+  .score{position:absolute;left:50%;top:0;transform:translateX(-50%);height:56px;
+    display:flex;align-items:center;gap:14px;pointer-events:none}
+  .score .sd{display:flex;align-items:center;gap:9px;font-family:var(--mono)}
+  .score .nm{font-size:11px;letter-spacing:.16em;font-weight:700}
+  .score .sc{font-size:30px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+  .score .t-side .nm,.score .t-side .sc{color:var(--t)}
+  .score .ct-side .nm,.score .ct-side .sc{color:var(--ct)}
+  .score .sep{width:1px;height:22px;background:var(--line-2)}
+  .score .rd{font-family:var(--mono);font-size:10px;letter-spacing:.16em;
+    color:var(--ink-faint);text-align:center;line-height:1.5}
+  .score .rd b{display:block;color:var(--ink);font-size:13px;letter-spacing:.1em}
+
+  .meta{font-family:var(--mono);font-size:11px;color:var(--ink-faint);display:flex;gap:14px;
+    letter-spacing:.08em}
+  .meta span b{color:var(--ink-dim);font-weight:600}
+  .hdr-right{margin-left:auto;display:flex;gap:6px;align-items:center}
+
+  .loadbtn{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--ink-dim);
+    border:1px solid var(--line);background:var(--panel-2);padding:7px 11px;border-radius:7px;
+    cursor:pointer;transition:all .14s ease;white-space:nowrap;position:relative}
+  .loadbtn:hover{border-color:var(--line-2);color:var(--ink);background:var(--panel-3)}
+  .loadbtn:not(.off){color:var(--accent);border-color:rgba(62,232,154,.32);
+    background:rgba(62,232,154,.07)}
+  .loadbtn:not(.off):hover{background:rgba(62,232,154,.13)}
+  .loadbtn input[type=file]{display:none}
+
+  /* ---------------- stage ---------------- */
+  main{position:relative;display:flex;align-items:center;justify-content:center;
+    padding:14px;min-height:0;min-width:0;overflow:hidden}
   /* The canvases keep a 900x900 drawing buffer (so all the world->pixel maths
      stays in 900-space) but are scaled down by CSS to fit the viewport. Without
      this the fixed 900px stage overlaps the transport bar on any screen shorter
      than ~1050px and the round buttons become unclickable. */
-  #stage{position:relative;background:#070a0e;border:1px solid var(--line);border-radius:8px;
-    overflow:hidden;aspect-ratio:1/1;height:100%;max-height:100%;max-width:100%}
+  #stage{position:relative;background:#04060a;border:1px solid var(--line);border-radius:var(--r);
+    overflow:hidden;aspect-ratio:1/1;height:100%;max-height:100%;max-width:100%;
+    box-shadow:0 24px 70px -30px #000, inset 0 0 90px -40px rgba(79,168,245,.18)}
   #radar{display:block;width:100%;height:100%;image-rendering:auto}
   #overlay{position:absolute;inset:0;width:100%;height:100%}
 
-  /* right rail */
-  aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;padding:16px}
+  /* Round + clock, floating over the map like a broadcast corner bug. */
+  #stage-bug{position:absolute;left:12px;top:12px;display:flex;align-items:center;gap:9px;
+    padding:7px 12px;border-radius:8px;background:rgba(8,11,16,.82);
+    border:1px solid var(--line);backdrop-filter:blur(10px);font-family:var(--mono);
+    font-size:11px;letter-spacing:.1em;color:var(--ink-dim);pointer-events:none;z-index:4}
+  #stage-bug .dot{width:7px;height:7px;border-radius:50%;background:var(--danger)}
+  #stage-bug.playing .dot{background:var(--accent);animation:livepulse 1.4s ease-in-out infinite}
+  #stage-bug b{color:var(--ink);letter-spacing:.06em}
+  @keyframes livepulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(62,232,154,.55)}
+                       50%{opacity:.65;box-shadow:0 0 0 6px rgba(62,232,154,0)}}
+
+  /* ---------------- the moment: a lower-third over the map ----------------
+     This is the product, so it gets the biggest number on the screen. It
+     appears only when the playhead is actually on a death; the rest of the
+     time the map is unobstructed. */
+  /* A lower third has to stay a THIRD. On a small window the stage shrinks but
+     the card's content does not, and at 800x450 it grew to cover 84% of the
+     map - measured, not guessed. Capped, and the least important row goes
+     first. */
+  #moment{position:absolute;left:12px;right:12px;bottom:12px;z-index:5;
+    max-height:42%;
+    border-radius:var(--r);overflow:hidden;pointer-events:none;
+    background:linear-gradient(105deg,rgba(9,12,18,.96),rgba(13,18,26,.9));
+    border:1px solid var(--line-2);backdrop-filter:blur(12px);
+    box-shadow:0 20px 50px -20px #000;
+    transform:translateY(14px);opacity:0;
+    transition:opacity .22s ease,transform .22s cubic-bezier(.2,.8,.3,1)}
+  #moment.on{transform:translateY(0);opacity:1}
+  #moment:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
+    background:var(--danger)}
+  .mo-wrap{display:grid;grid-template-columns:auto 1fr;gap:18px;padding:13px 16px 13px 18px;
+    align-items:center}
+  .mo-swing{text-align:center;min-width:96px}
+  .mo-swing .v{font-family:var(--mono);font-size:38px;font-weight:700;line-height:1;
+    color:var(--danger);font-variant-numeric:tabular-nums;letter-spacing:-.02em;
+    text-shadow:0 0 26px rgba(255,77,94,.45)}
+  .mo-swing .v.up{color:var(--ok);text-shadow:0 0 26px rgba(62,232,154,.45)}
+  .mo-swing .k{font-family:var(--mono);font-size:8.5px;letter-spacing:.18em;
+    color:var(--ink-faint);margin-top:5px}
+  .mo-body{min-width:0}
+  .mo-hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:5px}
+  .mo-hd .where{font-size:17px;font-weight:650;letter-spacing:-.01em}
+  .mo-hd .where i{font-style:normal;color:var(--ink-faint);margin:0 6px;font-size:14px}
+  .mo-hd .wpn{font-family:var(--mono);font-size:11px;color:var(--ink-dim)}
+  .mo-hd .state{font-family:var(--mono);font-size:11px;color:var(--ink-faint);margin-left:auto}
+  .mo-ln{font-size:12.5px;color:var(--ink-dim);line-height:1.5}
+  .mo-tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}
+
+  /* ---------------- right rail, tabbed ---------------- */
+  aside{background:var(--panel);border-left:1px solid var(--line);display:flex;
+    flex-direction:column;min-height:0;overflow:hidden}
+  .tabs{display:flex;border-bottom:1px solid var(--line);background:var(--bg);flex:0 0 auto}
+  .tab{flex:1;padding:11px 4px;background:none;border:0;border-bottom:2px solid transparent;
+    color:var(--ink-faint);font-family:var(--mono);font-size:10px;letter-spacing:.13em;
+    cursor:pointer;transition:all .14s ease;position:relative}
+  .tab:hover{color:var(--ink-dim);background:rgba(255,255,255,.02)}
+  .tab.on{color:var(--accent);border-bottom-color:var(--accent);background:rgba(62,232,154,.05)}
+  .tab .badge{position:absolute;top:6px;right:8px;width:5px;height:5px;border-radius:50%;
+    background:var(--danger);display:none}
+  .tab.has .badge{display:block}
+  .tabpane{display:none;overflow-y:auto;padding:14px;flex:1 1 auto;min-height:0}
+  .tabpane.on{display:block}
+
+  .rail-h{font-family:var(--mono);font-size:9.5px;letter-spacing:.18em;color:var(--ink-faint);
+    text-transform:uppercase;margin:0 0 9px;display:flex;align-items:baseline;gap:8px}
+  .rail-h.spaced{margin-top:20px}
+  .vsum{color:var(--ink-faint);letter-spacing:0;text-transform:none;font-weight:400;
+    font-size:10.5px;margin-left:auto}
+
   /* live round win probability */
-  #winprob{padding:2px 10px 8px}
-  .wp-bar{height:6px;border-radius:3px;overflow:hidden;background:var(--ct);
-          box-shadow:inset 0 0 0 1px var(--line)}
+  #winprob{margin-bottom:12px}
+  .wp-bar{height:7px;border-radius:4px;overflow:hidden;background:var(--ct);
+          box-shadow:inset 0 0 0 1px rgba(0,0,0,.4)}
   /* the fill is the T share; whatever is left of the track is the CT share */
   .wp-bar i{display:block;height:100%;background:var(--t);transition:width .12s linear}
-  .wp-lbl{display:flex;justify-content:space-between;margin-top:3px;
-          font-family:var(--mono);font-size:10px}
+  .wp-lbl{display:flex;justify-content:space-between;margin-top:5px;
+          font-family:var(--mono);font-size:10px;font-variant-numeric:tabular-nums}
   .wp-lbl .t{color:var(--t)} .wp-lbl .ct{color:var(--ct)}
 
   /* team panels */
   .tm-h{display:flex;justify-content:space-between;align-items:baseline;
-        padding:8px 10px 4px;font-family:var(--mono);font-size:10px;
-        letter-spacing:.12em;text-transform:uppercase;border-top:1px solid var(--line)}
-  .tm-h.t .tm-name{color:var(--t)} .tm-h.ct .tm-name{color:var(--ct)}
+        padding:7px 9px;font-family:var(--mono);font-size:9.5px;
+        letter-spacing:.15em;text-transform:uppercase;border-radius:7px 7px 0 0;
+        background:var(--panel-2)}
+  .tm-h.t{color:var(--t);border-left:2px solid var(--t)}
+  .tm-h.ct{color:var(--ct);border-left:2px solid var(--ct)}
+  .tm-h span{color:var(--ink-faint);letter-spacing:.06em}
+  .tm-body{margin-bottom:14px;border:1px solid var(--line);border-top:0;
+    border-radius:0 0 7px 7px;overflow:hidden}
+  .prow{display:grid;grid-template-columns:8px 1fr auto;gap:9px;align-items:center;
+        padding:7px 9px;cursor:pointer;transition:background .12s ease}
+  .prow.gear{grid-template-columns:8px minmax(0,1fr) 26px 34px auto;gap:6px}
+  .prow+.prow{border-top:1px solid rgba(255,255,255,.035)}
+  .prow:hover{background:var(--panel-2)}
+  .prow.pov{background:rgba(62,232,154,.07);box-shadow:inset 2px 0 0 var(--accent)}
+  .prow .nm{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .prow .kd{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);
+    font-variant-numeric:tabular-nums}
+  .prow.dead{opacity:.4}
+  .prow.dead .nm{text-decoration:line-through;text-decoration-thickness:1px}
+
+  /* voice + flash rows */
+  .vrow{display:grid;grid-template-columns:8px 1fr auto;gap:9px;align-items:center;
+        padding:6px 9px;border-radius:7px;cursor:pointer;border-left:2px solid transparent;
+        transition:background .12s ease}
+  .vrow:hover{background:var(--panel-2)}
+  .vrow .vdot{width:8px;height:8px;border-radius:50%;background:var(--ink-faint);
+    transition:all .12s ease}
+  .vrow.talking{border-left-color:var(--accent);background:rgba(62,232,154,.05)}
+  .vrow.talking .vdot{background:var(--accent);box-shadow:0 0 9px var(--accent)}
+  .vrow.muted{opacity:.36}
+  .vrow.me{background:var(--panel-2);box-shadow:inset 2px 0 0 var(--accent)}
+  .vrow .nm{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .vrow .kd{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);
+    font-variant-numeric:tabular-nums}
+  .fbar{width:8px;height:20px;border-radius:2px;background:var(--ok);
+        overflow:hidden;display:block;position:relative}
+  .fbar i{position:absolute;left:0;bottom:0;width:100%;height:0;
+          background:var(--danger);display:block;transition:height .3s ease}
+  .vhint{font-size:10px;color:var(--ink-faint);margin-top:7px;font-style:italic}
+
+  /* ---------------- coach cards ---------------- */
+  #coach{display:flex;flex-direction:column;gap:10px}
+  .card{background:linear-gradient(160deg,var(--panel-2),var(--panel));
+    border:1px solid var(--line);border-radius:9px;padding:11px 12px;
+    transition:border-color .15s ease}
+  .card:hover{border-color:var(--line-2)}
+  .card.live{border-color:rgba(255,77,94,.38);
+    box-shadow:0 0 0 1px rgba(255,77,94,.1), 0 8px 30px -14px rgba(255,77,94,.5)}
+  .card .hd{display:flex;justify-content:space-between;align-items:baseline;gap:8px;
+    font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--ink-faint);
+    text-transform:uppercase;margin-bottom:7px}
+  .card .hd b{color:var(--ink);letter-spacing:.04em}
+  .card .ln{font-size:12.5px;line-height:1.5}
+  .card .tip{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);
+    font-size:12.5px;color:var(--ink-dim);line-height:1.5}
+  .card .vd{color:var(--ink);margin-bottom:3px}
+  .muted{color:var(--ink-faint);font-size:12px;line-height:1.6}
+  .muted code{background:var(--panel-2);border:1px solid var(--line);border-radius:4px;
+    padding:1px 5px;font-family:var(--mono);font-size:11px;color:var(--ink-dim)}
+
+  .tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+  .tag{font-family:var(--mono);font-size:9px;letter-spacing:.1em;padding:3px 7px;
+    border-radius:5px;border:1px solid var(--line-2);color:var(--ink-dim);
+    background:var(--panel-3);text-transform:uppercase;white-space:nowrap}
+  .tag.bad{color:var(--danger);border-color:rgba(255,77,94,.4);background:rgba(255,77,94,.1)}
+  .tag.warn{color:var(--warn);border-color:rgba(240,168,60,.4);background:rgba(240,168,60,.1)}
+  .tag.good{color:var(--ok);border-color:rgba(62,232,154,.4);background:rgba(62,232,154,.1)}
+  .tag.swing{font-weight:700}
+
+  /* ---------------- stat tiles ---------------- */
+  .statgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .stat{background:linear-gradient(160deg,var(--panel-2),var(--panel));
+    border:1px solid var(--line);border-radius:9px;padding:11px 12px;position:relative;
+    overflow:hidden;transition:border-color .15s ease}
+  .stat:hover{border-color:var(--line-2)}
+  .stat .v{font-family:var(--mono);font-size:23px;font-weight:700;line-height:1;
+    font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+  .stat .k{font-family:var(--mono);font-size:8.5px;letter-spacing:.15em;color:var(--ink-faint);
+    margin-top:6px;text-transform:uppercase}
+  .stat.hi .v{color:var(--ok)} .stat.lo .v{color:var(--danger)}
+  .stat.wide{grid-column:1/-1}
+
+  .legend{display:flex;gap:14px;font-family:var(--mono);font-size:10px;color:var(--ink-faint);
+    letter-spacing:.06em}
+  .legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+
+  /* ---------------- transport: the round story strip ---------------- */
+  .transport{grid-column:1/-1;background:linear-gradient(180deg,#0b0e14,#10151d);
+    border-top:1px solid var(--line);padding:9px 16px 11px;display:flex;
+    flex-direction:column;gap:9px}
+  .tl-row{display:flex;align-items:center;gap:12px}
+  .rounds{display:flex;gap:3px;flex:1;overflow-x:auto;padding-bottom:2px}
+  .rbtn{position:relative;min-width:30px;height:30px;border-radius:6px;border:1px solid var(--line);
+    background:var(--panel-2);color:var(--ink-faint);font-family:var(--mono);font-size:11px;
+    cursor:pointer;transition:all .13s ease;flex:0 0 auto;font-variant-numeric:tabular-nums}
+  .rbtn:hover{color:var(--ink);border-color:var(--line-2);transform:translateY(-1px)}
+  /* The winner's colour as a base strip, so the row reads as a story of the
+     match at a glance rather than as twenty-two identical buttons. */
+  .rbtn.t-win{box-shadow:inset 0 -3px 0 var(--t)}
+  .rbtn.ct-win{box-shadow:inset 0 -3px 0 var(--ct)}
+  .rbtn.flag:after{content:"";position:absolute;top:4px;right:4px;width:5px;height:5px;
+    border-radius:50%;background:var(--danger);box-shadow:0 0 6px rgba(255,77,94,.8)}
+  .rbtn.active{color:#07090d;background:var(--accent);border-color:var(--accent);
+    font-weight:700;transform:translateY(-2px);box-shadow:var(--glow)}
+  .rbtn.active.flag:after{background:#07090d;box-shadow:none}
+
+  .btn{background:var(--panel-2);border:1px solid var(--line);color:var(--ink);
+    border-radius:8px;cursor:pointer;transition:all .13s ease}
+  .btn:hover{border-color:var(--line-2)}
+  .btn.play{width:40px;height:34px;font-size:13px;color:var(--accent);
+    border-color:rgba(62,232,154,.3);background:rgba(62,232,154,.08)}
+  .btn.play:hover{background:rgba(62,232,154,.16)}
+  .scrub{flex:1;display:flex;align-items:center;gap:12px}
+  #seek{flex:1;appearance:none;-webkit-appearance:none;height:5px;border-radius:3px;
+    background:var(--line);outline:none}
+  #seek::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:14px;height:14px;
+    border-radius:50%;background:var(--accent);cursor:pointer;
+    box-shadow:0 0 0 3px rgba(62,232,154,.2);transition:box-shadow .13s ease}
+  #seek::-webkit-slider-thumb:hover{box-shadow:0 0 0 6px rgba(62,232,154,.25)}
+  .clock{font-family:var(--mono);font-size:11px;color:var(--ink-faint);
+    font-variant-numeric:tabular-nums;white-space:nowrap}
+  .clock b{color:var(--ink)}
+  .speed{font-family:var(--mono);font-size:11px;color:var(--ink-dim);cursor:pointer;
+    user-select:none;padding:6px 10px;border:1px solid var(--line);border-radius:7px;
+    background:var(--panel-2);transition:all .13s ease}
+  .speed:hover{border-color:var(--line-2);color:var(--ink)}
+
+  /* ---------------- killfeed ---------------- */
+  #killfeed{position:absolute;right:10px;top:10px;display:flex;flex-direction:column;
+    gap:4px;pointer-events:none;z-index:4}
+  .kf{display:flex;align-items:center;gap:7px;padding:5px 9px;border-radius:6px;
+    background:rgba(8,11,16,.86);border:1px solid var(--line);font-size:11.5px;
+    backdrop-filter:blur(10px);animation:kfin .18s ease-out}
+  @keyframes kfin{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}
+  .kf .a{color:var(--ink)} .kf .v{color:var(--ink-faint);text-decoration:line-through}
+  .kf .w{font-family:var(--mono);font-size:10px;color:var(--ink-dim)}
+  .kf.pov{border-color:rgba(62,232,154,.45);box-shadow:0 0 0 1px rgba(62,232,154,.12)}
+
+  .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:12px;color:var(--ink-faint);font-family:var(--mono);
+    font-size:12px;text-align:center;padding:30px;letter-spacing:.06em}
+  .empty code{background:var(--panel-2);border:1px solid var(--line);border-radius:5px;
+    padding:2px 7px;color:var(--ink-dim)}
+
+  /* ---------------- coach chat slide-over ---------------- */
+  #chat-panel{position:fixed;top:56px;right:0;bottom:0;width:440px;max-width:92vw;z-index:40;
+    background:linear-gradient(180deg,#0d1219,#0a0d13);border-left:1px solid var(--line-2);
+    box-shadow:-30px 0 70px -30px #000;display:flex;flex-direction:column;
+    transform:translateX(102%);transition:transform .26s cubic-bezier(.2,.8,.3,1);
+    visibility:hidden}
+  #chat-panel.on{transform:translateX(0);visibility:visible}
+  .chat-head{display:flex;align-items:center;gap:10px;padding:13px 14px;
+    border-bottom:1px solid var(--line)}
+  .chat-head .rail-h{margin:0}
+  #chat-model{margin-left:auto}
+  #chat-model,#chat-matchtype,#chat-role-pick{background:var(--panel-2);color:var(--ink-dim);
+    border:1px solid var(--line);border-radius:7px;padding:5px 8px;font-family:var(--mono);
+    font-size:10.5px;cursor:pointer;outline:none}
+  #chat-model:hover,#chat-matchtype:hover,#chat-role-pick:hover{border-color:var(--line-2)}
+  .chat-x{background:none;border:1px solid var(--line);color:var(--ink-faint);width:28px;
+    height:28px;border-radius:7px;cursor:pointer;font-size:13px;transition:all .13s ease}
+  .chat-x:hover{color:var(--ink);border-color:var(--line-2)}
+  .chat-note{font-size:11px;color:var(--ink-faint);line-height:1.6;padding:10px 14px}
+  .chat-keyrow{display:flex;gap:7px;padding:0 14px 10px}
+  .chat-keyrow input{flex:1;background:var(--panel-2);border:1px solid var(--line);
+    border-radius:7px;padding:8px 10px;color:var(--ink);font-family:var(--mono);
+    font-size:11.5px;outline:none}
+  .chat-keyrow input:focus{border-color:var(--accent)}
+  .chat-keyrow button,#chat-send,#chat-stop{background:rgba(62,232,154,.1);
+    border:1px solid rgba(62,232,154,.32);color:var(--accent);border-radius:7px;
+    padding:8px 13px;font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;
+    cursor:pointer;transition:all .13s ease}
+  .chat-keyrow button:hover,#chat-send:hover,#chat-stop:hover{background:rgba(62,232,154,.2)}
+  #chat-stop{color:var(--danger);border-color:rgba(255,77,94,.35);background:rgba(255,77,94,.1)}
+  #chat-role{padding:0 14px 10px}
+  .chat-roles-row{display:flex;gap:7px;flex-wrap:wrap}
+  #chat-log{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:12px}
+  .msg{font-size:13px;line-height:1.6;white-space:pre-wrap;word-wrap:break-word}
+  .msg.user{background:var(--panel-2);border:1px solid var(--line);border-radius:9px;
+    padding:9px 11px;color:var(--ink)}
+  .msg.assistant{color:var(--ink-dim);padding:0 2px;border-left:2px solid var(--line-2);
+    padding-left:11px}
+  .msg.assistant.err{color:var(--danger);border-left-color:var(--danger)}
+  .msg .at{display:block;font-family:var(--mono);font-size:9px;letter-spacing:.12em;
+    color:var(--ink-faint);margin-bottom:5px}
+  #chat-chips{display:flex;gap:6px;flex-wrap:wrap;padding:0 14px 10px}
+  .chip{background:var(--panel-2);border:1px solid var(--line);color:var(--ink-dim);
+    border-radius:20px;padding:6px 11px;font-size:11px;cursor:pointer;
+    transition:all .13s ease;text-align:left}
+  .chip:hover{border-color:var(--accent);color:var(--ink)}
+  #chat-form{border-top:1px solid var(--line);padding:11px 14px}
+  #chat-q{width:100%;background:var(--panel-2);border:1px solid var(--line);border-radius:9px;
+    padding:10px 11px;color:var(--ink);font-family:var(--sans);font-size:13px;resize:none;
+    outline:none;line-height:1.5}
+  #chat-q:focus{border-color:var(--accent)}
+  .chat-actions{display:flex;align-items:center;gap:8px;margin-top:8px}
+  .chat-at{font-family:var(--mono);font-size:10px;color:var(--ink-faint);margin-right:auto}
+
+  /* Narrow windows: the rail is the first thing to go, since the map and the
+     moment card carry the review on their own. */
+  /* Short windows: shed the card's supporting rows rather than the map. */
+  @media (max-height:620px){
+    .mo-swing .v{font-size:28px}
+    .mo-tags{display:none}
+    .mo-hd .where{font-size:15px}
+  }
+  @media (max-height:520px){
+    .mo-ln{display:none}
+    .mo-wrap{padding:9px 12px 9px 14px}
+  }
+  @media (max-width:1180px){
+    body{grid-template-columns:1fr 310px}
+    .score .sc{font-size:24px}
+    .meta{display:none}
+  }
+  @media (max-width:920px){
+    body{grid-template-columns:1fr}
+    aside{display:none}
+  }
+
+  /* ---------------- carried over: still used by the render code ---------------- */
   .tm-alive{color:var(--ink-faint);letter-spacing:0;text-transform:none}
-  .prow.gear{grid-template-columns:8px minmax(0,1fr) 26px 34px auto;gap:6px;
-             padding:4px 10px;align-items:center}
-  .prow.gear .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .hpn{font-family:var(--mono);font-size:10px;color:var(--ink-dim);text-align:right}
+  .hpn{font-family:var(--mono);font-size:10px;color:var(--ink-dim);text-align:right;
+    font-variant-numeric:tabular-nums}
   .hpbar{display:block;height:4px;background:var(--line);border-radius:2px;overflow:hidden}
   .hpbar i{display:block;height:100%;background:var(--accent);transition:width .1s linear}
   .hpbar i.warn{background:var(--t)} .hpbar i.low{background:var(--danger)}
   .gear-icons{display:flex;align-items:center;gap:2px;justify-content:flex-end;min-height:14px}
-  /* Valve's icons are white; dim them so they read as equipment rather than
-     competing with the player names */
   .gi{height:11px;width:auto;opacity:.78;flex:none}
   .gi-gun{height:13px} .gi-pistol{height:10px;opacity:.6}
   .gi-nade{height:11px} .gi-c4{height:12px;opacity:.95}
   .gi-kit{font-size:11px;color:var(--ct);opacity:.9;line-height:1}
-  /* what a death cost the round, in win probability */
-  .cost{font-family:var(--mono);font-size:10px;color:var(--danger);
-        margin-right:8px;opacity:.85}
-  .cost.big{font-weight:600;opacity:1}
-  .cost.none{color:var(--ink-faint)}
-  /* match rating sits next to the name; 1.00 is the average player */
-  .rat{font-family:var(--mono);font-size:10px;color:var(--ink-faint);margin-left:6px;font-weight:400}
-  .rat.good{color:var(--accent)} .rat.bad{color:var(--danger)}
   .prow.gear.dead .gear-icons{opacity:.25}
-
-  /* voice */
-  .vsum{color:var(--ink-faint);letter-spacing:0;text-transform:none;font-weight:400}
-  .vrow{display:grid;grid-template-columns:8px 1fr auto;gap:8px;align-items:center;
-        padding:5px 10px;cursor:pointer;border-left:2px solid transparent}
-  .vrow:hover{background:var(--panel-2)}
-  .vrow .vdot{width:8px;height:8px;border-radius:50%;background:var(--ink-faint);
-              transition:background .12s,box-shadow .12s}
-  /* a talking player lights up; this is the only moving part of the panel */
-  .vrow.me{background:var(--panel-2)}
-  .fbar{width:8px;height:20px;border-radius:2px;background:var(--ok);
-        overflow:hidden;display:block;position:relative}
-  .fbar i{position:absolute;left:0;bottom:0;width:100%;height:0;
-          background:var(--danger);display:block}
-  .vrow.talking{border-left-color:var(--accent)}
-  .vrow.talking .vdot{background:var(--accent);box-shadow:0 0 7px var(--accent)}
-  .vrow.talking .nm{color:var(--ink)}
-  .vrow.muted{opacity:.4}
-  .vrow.muted .nm{text-decoration:line-through}
-  .vhint{font-family:var(--mono);font-size:10px;color:var(--ink-faint);
-         padding:2px 10px 8px}
-  .rail-h{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;
-    color:var(--ink-faint);margin:2px 0 10px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  /* What a death cost the round, on the death card. */
+  .cost{font-family:var(--mono);font-size:10px;color:var(--danger);opacity:.85;
+    font-variant-numeric:tabular-nums}
+  .cost.big{font-weight:700;opacity:1}
+  .cost.none{color:var(--ink-faint)}
+  .rat{font-family:var(--mono);font-size:10px;color:var(--ink-faint);margin-left:6px;
+    font-weight:400;font-variant-numeric:tabular-nums}
+  .rat.good{color:var(--accent)} .rat.bad{color:var(--danger)}
   .roster{display:flex;flex-direction:column;gap:3px;margin-bottom:22px}
-  .prow{display:grid;grid-template-columns:8px 1fr auto;gap:9px;align-items:center;
-    padding:7px 8px;border-radius:6px;font-size:13px;background:var(--panel-2)}
-  .prow .dot{width:8px;height:8px;border-radius:50%}
-  .prow .nmwrap{min-width:0}
-  .prow .nm{display:block;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  /* current callout, under the name - the whole point of the roster now */
-  .prow .pl{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.05em;
-    text-transform:uppercase;color:var(--ink-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .prow.dead .pl{visibility:hidden}
-  .prow .kd{font-family:var(--mono);font-size:12px;color:var(--ink-dim)}
-  .loadbtn.off{opacity:.5}
-  .prow.dead{opacity:.4}
-  .prow.dead .nm{text-decoration:line-through}
-  .prow.pov{outline:1px solid var(--accent)}
-
-  /* coach rail */
-  #coach{display:flex;flex-direction:column;gap:10px;margin-bottom:20px}
-  .card{background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:10px 11px}
-  .card.live{border-color:var(--danger)}
-  .card .hd{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
-    color:var(--ink-faint);display:flex;justify-content:space-between;gap:8px;margin-bottom:7px}
-  .card .hd b{color:var(--danger)}
-  .card .ln{font-size:12.5px;line-height:1.45;margin:0 0 5px}
-  .card .ln:last-child{margin-bottom:0}
-  .card .where{font-family:var(--mono);font-size:12px;color:var(--ink)}
-  .card .where i{color:var(--ink-faint);font-style:normal}
-  .tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px}
-  .tag{font-family:var(--mono);font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;
-    border:1px solid var(--line);border-radius:3px;padding:2px 5px;color:var(--ink-dim)}
-  .tag.bad{border-color:var(--danger);color:var(--danger)}
-  .tag.warn{border-color:var(--t);color:var(--t)}
-  /* running into a duel - you cannot shoot accurately above ~140 u/s */
-  .card .ln b.warn{color:var(--t)}
-  .tip{border-left:2px solid var(--accent);padding-left:8px;margin-top:8px;font-size:12.5px;line-height:1.45}
-  .tip .vd{color:var(--ink-dim);margin-bottom:4px}
-  /* coach chat - a slide-over, so the transcript has room the rail doesn't have */
-  #chat-panel{position:fixed;top:0;right:0;bottom:0;width:min(420px,92vw);z-index:40;
-    background:var(--panel);border-left:1px solid var(--line);display:flex;
-    flex-direction:column;transform:translateX(100%);transition:transform .16s ease;
-    box-shadow:-18px 0 40px rgba(0,0,0,.45)}
-  #chat-panel.on{transform:none}
-  .chat-head{display:flex;align-items:center;gap:8px;padding:12px 14px;
-    border-bottom:1px solid var(--line)}
-  .chat-head select{margin-left:auto;background:var(--panel-2);color:var(--ink-dim);
-    border:1px solid var(--line);border-radius:5px;font-family:var(--mono);
-    font-size:10px;padding:3px 5px}
-  .chat-x{background:none;border:none;color:var(--ink-faint);cursor:pointer;
-    font-size:14px;line-height:1;padding:2px 4px}
-  .chat-x:hover{color:var(--ink)}
-
-  #chat-key{padding:12px 14px;border-bottom:1px solid var(--line)}
-  .chat-note{font-size:11px;line-height:1.5;color:var(--ink-faint)}
-  #chat-role{padding:10px 14px;border-bottom:1px solid var(--line)}
-  .chat-roles-row{display:flex;gap:6px}
-  .chat-roles-row select{flex:1;min-width:0}
+  /* The AI half of a card, marked so it is never mistaken for the arithmetic. */
+  .tip{border-left:2px solid var(--accent);padding-left:9px;margin-top:8px;
+    font-size:12.5px;line-height:1.5;color:var(--ink-dim)}
+  .tip .vd{color:var(--ink);margin-bottom:4px}
+  #chat-key{padding:12px 0;border-bottom:1px solid var(--line)}
+  #chat-key-save{font-family:var(--mono)}
   #chat-role-ev{margin-top:6px;font-family:var(--mono)}
-  .chat-keyrow{display:flex;gap:6px;margin:8px 0 6px}
-  .chat-keyrow input{flex:1;min-width:0;background:var(--panel-2);
-    border:1px solid var(--line);border-radius:6px;color:var(--ink);
-    font-family:var(--mono);font-size:11px;padding:7px 9px}
-  .chat-keyrow input:focus{outline:none;border-color:var(--accent)}
-  .chat-keyrow button,#chat-send,#chat-stop,#chat-key-save{font-family:var(--mono);
-    font-size:11px;background:var(--accent);color:#06120c;border:none;border-radius:6px;
-    padding:7px 12px;cursor:pointer;font-weight:700}
-  #chat-stop{background:var(--danger);color:var(--ink)}
-  #chat-send:disabled{opacity:.4;cursor:default}
-
-  #chat-log{flex:1;overflow-y:auto;padding:12px 14px;display:flex;
-    flex-direction:column;gap:12px}
-  .msg{font-size:12.5px;line-height:1.55;white-space:pre-wrap;word-wrap:break-word}
-  .msg.you{background:var(--panel-2);border-radius:8px;padding:8px 10px;
-    align-self:flex-end;max-width:88%}
-  .msg.coach{border-left:2px solid var(--accent);padding-left:10px}
-  .msg.err{border-left:2px solid var(--danger);padding-left:10px;color:var(--danger)}
-  .msg .at{display:block;font-family:var(--mono);font-size:10px;
-    color:var(--ink-faint);margin-bottom:4px;white-space:normal}
-  .msg .cursor{opacity:.6}
   .chat-empty{color:var(--ink-faint);font-size:12px;line-height:1.6}
-
-  #chat-chips{display:flex;flex-wrap:wrap;gap:5px;padding:0 14px 8px}
-  .chip{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;
-    color:var(--ink-dim);cursor:pointer;font-size:11px;padding:4px 9px}
-  .chip:hover{border-color:var(--accent);color:var(--ink)}
-
-  #chat-form{border-top:1px solid var(--line);padding:10px 14px 12px}
-  #chat-q{width:100%;box-sizing:border-box;resize:vertical;background:var(--panel-2);
-    border:1px solid var(--line);border-radius:6px;color:var(--ink);
-    font-family:var(--sans);font-size:12.5px;padding:8px 10px}
-  #chat-q:focus{outline:none;border-color:var(--accent)}
-  .chat-actions{display:flex;align-items:center;gap:6px;margin-top:7px}
-  .chat-at{flex:1;font-family:var(--mono);font-size:10px;color:var(--ink-faint)}
-  .muted{color:var(--ink-faint);font-size:12px;line-height:1.5}
-  .muted code{color:var(--accent);background:var(--panel-2);padding:1px 5px;border-radius:3px;
-    font-family:var(--mono);font-size:11px}
-  .rbtn.flag{position:relative}
-  .rbtn.flag::after{content:"";position:absolute;top:2px;right:2px;width:4px;height:4px;
-    border-radius:50%;background:var(--danger)}
-  .rbtn.active.flag::after{background:#06120c}
-
-  .statgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-  .stat{background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:9px 10px}
-  .stat .v{font-family:var(--mono);font-size:19px;font-weight:600}
-  .stat .l{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);margin-top:2px}
-  .stat .v.good{color:var(--accent)} .stat .v.bad{color:var(--danger)}
-
-  /* transport */
-  .transport{grid-column:1/-1;background:var(--panel);border-top:1px solid var(--line);
-    padding:12px 20px;display:flex;flex-direction:column;gap:10px}
-  .tl-row{display:flex;align-items:center;gap:14px}
-  .btn{font-family:var(--mono);font-size:13px;color:var(--ink);background:var(--panel-2);
-    border:1px solid var(--line);border-radius:6px;padding:7px 14px;cursor:pointer;min-width:44px}
-  .btn:hover{border-color:var(--accent)}
-  .btn.play{background:var(--accent);color:#06120c;border-color:var(--accent);font-weight:700}
-  .rounds{display:flex;gap:4px;flex-wrap:wrap}
-  .rbtn{font-family:var(--mono);font-size:11px;width:26px;height:26px;border-radius:5px;
-    border:1px solid var(--line);background:var(--panel-2);color:var(--ink-dim);cursor:pointer}
-  .rbtn.active{background:var(--accent);color:#06120c;border-color:var(--accent);font-weight:700}
-  .rbtn.t-win{border-bottom:2px solid var(--t)} .rbtn.ct-win{border-bottom:2px solid var(--ct)}
-  .scrub{flex:1;display:flex;align-items:center;gap:12px}
-  input[type=range]{flex:1;accent-color:var(--accent);height:4px}
-  .clock{font-family:var(--mono);font-size:14px;min-width:88px;color:var(--ink-dim)}
-  .clock b{color:var(--ink)}
-  .speed{font-family:var(--mono);font-size:12px;color:var(--ink-dim);cursor:pointer;
-    border:1px solid var(--line);border-radius:5px;padding:6px 9px;background:var(--panel-2)}
-
-  /* killfeed - HTML overlay rather than canvas text, so it stays crisp while
-     the canvas is CSS-scaled down on smaller screens */
-  #killfeed{position:absolute;top:10px;right:10px;z-index:2;pointer-events:none;
-    display:flex;flex-direction:column;align-items:flex-end;gap:4px;
-    font-family:var(--mono);font-size:11px;line-height:1}
-  .kf{display:flex;align-items:center;gap:7px;white-space:nowrap;
-    background:rgba(8,11,15,.82);border:1px solid var(--line);border-radius:4px;padding:5px 8px}
-  .kf .w{color:var(--ink-dim);text-transform:uppercase;letter-spacing:.05em}
-  .kf .wicon{display:block;height:12px;width:auto;max-width:46px;opacity:.92}
-  .kf .wicon.hs{height:13px}
-  .kf .hs{color:var(--danger);font-weight:700}
-  .kf .as{color:var(--ink-faint)}
-  .kf .side-t{color:var(--t)} .kf .side-ct{color:var(--ct)} .kf .side-none{color:var(--ink-faint)}
-  .kf.pov{border-color:var(--accent)}
-
-  .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
-    justify-content:center;gap:14px;color:var(--ink-dim);font-family:var(--mono);font-size:13px;text-align:center}
-  .empty code{color:var(--accent);background:var(--panel-2);padding:2px 7px;border-radius:4px}
-  input[type=file]{display:none}
-  .legend{display:flex;gap:16px;font-family:var(--mono);font-size:11px;color:var(--ink-faint);align-items:center}
-  .legend i{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:5px;vertical-align:middle}
 </style>
 </head>
 <body>
   <header>
     <div class="brand">OVER<b>WATCH</b></div>
+
+    <!-- The live scoreline. Built from round winners up to the playhead, not
+         from a final score, so scrubbing back genuinely rewinds it. -->
+    <div class="score" id="score">
+      <div class="sd t-side"><span class="nm">T</span><span class="sc" id="sc-t">0</span></div>
+      <div class="sep"></div>
+      <div class="rd">ROUND<b id="sc-rd">—</b></div>
+      <div class="sep"></div>
+      <div class="sd ct-side"><span class="sc" id="sc-ct">0</span><span class="nm">CT</span></div>
+    </div>
+
     <div class="meta" id="meta">
       <span>MAP <b id="m-map">—</b></span>
-      <span>ROUNDS <b id="m-rounds">—</b></span>
       <span>POV <b id="m-pov">—</b></span>
       <span>AT <b id="m-place">—</b></span>
+      <span style="display:none">ROUNDS <b id="m-rounds">—</b></span>
     </div>
-    <button class="loadbtn" id="toggle-callouts" style="margin-left:auto" title="Toggle map callout labels (C)">CALLOUTS ON</button>
-    <button class="loadbtn" id="toggle-utility" style="margin-left:8px" title="Toggle smokes, molotovs, flashes, HEs and throw arcs (U)">UTILITY ON</button>
-    <button class="loadbtn off" id="toggle-voice" style="margin-left:8px" title="Play the team's voice comms in sync (V)">VOICE OFF</button>
-    <!-- hidden until /api/status confirms a server is there to answer -->
-    <button class="loadbtn off" id="toggle-chat" style="margin-left:8px;display:none" title="Talk to the coach about this match (K)">COACH CHAT</button>
-    <label class="loadbtn" style="margin-left:8px">LOAD MATCH JSON<input type="file" id="file" accept=".json"></label>
+
+    <div class="hdr-right">
+      <button class="loadbtn" id="toggle-callouts" title="Toggle map callout labels (C)">CALLOUTS</button>
+      <button class="loadbtn" id="toggle-utility" title="Toggle smokes, molotovs, flashes, HEs and throw arcs (U)">UTILITY</button>
+      <button class="loadbtn off" id="toggle-voice" title="Play the team's voice comms in sync (V)">VOICE</button>
+      <!-- hidden until /api/status confirms a server is there to answer -->
+      <button class="loadbtn off" id="toggle-chat" style="display:none" title="Talk to the coach about this match (K)">COACH</button>
+      <label class="loadbtn" title="Load a parsed match JSON">LOAD<input type="file" id="file" accept=".json"></label>
+    </div>
   </header>
 
   <!-- Chat lives in its own slide-over rather than another rail section: a
@@ -325,6 +518,13 @@
       <canvas id="radar" width="900" height="900"></canvas>
       <canvas id="overlay" width="900" height="900"></canvas>
       <div id="killfeed"></div>
+
+      <!-- Broadcast corner bug: which round, how far in, playing or paused. -->
+      <div id="stage-bug"><span class="dot"></span><span id="bug-txt">—</span></div>
+
+      <!-- The moment. Only rendered when the playhead is actually on a death,
+           so the map is unobstructed the rest of the time. -->
+      <div id="moment"></div>
       <div class="empty" id="empty">
         <div>NO MATCH LOADED</div>
         <div>run <code>python parser/parse_demo.py your.dem</code>, then load the JSON from <code>data/</code></div>
@@ -333,32 +533,53 @@
   </main>
 
   <aside>
-    <div class="rail-h">Coach</div>
-    <div id="coach"></div>
-    <div id="voice-wrap" style="display:none">
-      <div class="rail-h">Voice <span id="voice-sum" class="vsum"></span></div>
-      <div id="voice-list"></div>
-      <div class="vhint">click a name to mute</div>
+    <!-- Tabs, not a stack. The old rail put seven sections in one scrolling
+         column, so a -24% swing and a voice list read at the same weight. -->
+    <div class="tabs" id="tabs">
+      <button class="tab on" data-pane="pane-coach">COACH<span class="badge"></span></button>
+      <button class="tab" data-pane="pane-teams">TEAMS</button>
+      <button class="tab" data-pane="pane-you">YOU</button>
+      <button class="tab" data-pane="pane-comms">COMMS</button>
     </div>
 
-    <div class="rail-h">Teams</div>
-    <div id="winprob" style="display:none" title="Estimated chance each side wins this round (our model, not HLTV's)">
-      <div class="wp-bar"><i id="wp-fill"></i></div>
-      <div class="wp-lbl"><span id="wp-t" class="t"></span><span id="wp-ct" class="ct"></span></div>
-    </div>
-    <div id="teams"></div>
-    <div id="flash-wrap" style="display:none">
-      <div class="rail-h">Flashes <span id="flash-sum" class="vsum"></span></div>
-      <div id="flash-list"></div>
-      <div class="vhint">blinds of 0.7s+ — one flash can catch both sides</div>
+    <div class="tabpane on" id="pane-coach">
+      <div id="coach"></div>
     </div>
 
-    <div class="rail-h">Selected player</div>
-    <div class="statgrid" id="statgrid"></div>
-    <div class="legend" style="margin-top:18px">
-      <span><i style="background:var(--t)"></i>T</span>
-      <span><i style="background:var(--ct)"></i>CT</span>
-      <span><i style="background:var(--danger)"></i>kill</span>
+    <div class="tabpane" id="pane-teams">
+      <div id="winprob" title="Estimated chance each side wins this round (our model, not HLTV's)">
+        <div class="wp-bar"><i id="wp-fill"></i></div>
+        <div class="wp-lbl"><span id="wp-t" class="t"></span><span id="wp-ct" class="ct"></span></div>
+      </div>
+      <div id="teams"></div>
+      <div class="legend">
+        <span><i style="background:var(--t)"></i>T</span>
+        <span><i style="background:var(--ct)"></i>CT</span>
+        <span><i style="background:var(--danger)"></i>kill</span>
+      </div>
+    </div>
+
+    <div class="tabpane" id="pane-you">
+      <div class="rail-h">Selected player</div>
+      <div class="statgrid" id="statgrid"></div>
+      <div id="flash-wrap" style="display:none">
+        <div class="rail-h spaced">Flashes <span id="flash-sum" class="vsum"></span></div>
+        <div id="flash-list"></div>
+        <div class="vhint">blinds of 0.7s+ — one flash can catch both sides</div>
+      </div>
+    </div>
+
+    <div class="tabpane" id="pane-comms">
+      <div id="voice-wrap" style="display:none">
+        <div class="rail-h">Voice <span id="voice-sum" class="vsum"></span></div>
+        <div id="voice-list"></div>
+        <div class="vhint">click a name to mute</div>
+      </div>
+      <div id="comms-empty" class="muted">
+        No voice extracted for this match.<br><br>
+        <code>python parser/voice.py your.dem</code><br><br>
+        pulls the in-game comms out and syncs them to the playhead.
+      </div>
     </div>
   </aside>
 
@@ -1263,6 +1484,7 @@ function buildVoicePanel(){
   const wrap=$("#voice-wrap");
   if(!VOICE || !VOICE.players.length){ wrap.style.display="none"; return; }
   wrap.style.display="";
+  const ce=$("#comms-empty"); if(ce) ce.style.display="none";
   const total=VOICE.players.reduce((s,p)=>s+p.seconds,0);
   $("#voice-sum").textContent=`${VOICE.players.length} players · ${Math.round(total/60)} min`;
   $("#voice-list").innerHTML = VOICE.players.map(p=>`
@@ -1293,7 +1515,7 @@ function toggleVoice(){
   if(!VOICE){ return; }
   voiceOn=!voiceOn;
   const b=$("#toggle-voice");
-  b.textContent=voiceOn?"VOICE ON":"VOICE OFF";
+  
   b.classList.toggle("off",!voiceOn);
   if(voiceOn){
     // preload was "none" so the first play would stall; warm them up now
@@ -1552,6 +1774,7 @@ function draw(){
   updateLiveStats(curTick);
   updateLiveSwing(curTick);   // after the grid rebuild: it rewrites one tile
   drawCoach(curTick);
+  drawChrome(curTick);
 }
 
 // ---- coach panel ----
@@ -1676,6 +1899,7 @@ function patternCards(){
 function drawCoach(curTick){
   const el=$("#coach");
   if(!ANALYSIS){
+    drawMoment(null);
     const key="none";
     if(coachKey!==key){
       coachKey=key;
@@ -1697,6 +1921,10 @@ function drawCoach(curTick){
   const inRound=deaths.filter(d=>d.round===rnd);
   const roundTip=(COACH?.rounds||[]).find(r=>r.round===rnd);
 
+  // The lower-third draws from the SAME `live` this panel uses. Computing it
+  // twice would eventually leave the card and the overlay on different deaths.
+  drawMoment(live);
+
   const key=[live?live.tick:"-",rnd,inRound.map(d=>d.tick).join(","),
              COACH?"c":"-"].join("|");
   if(key===coachKey) return;
@@ -1714,6 +1942,85 @@ function drawCoach(curTick){
   html+=patternCards();
   el.innerHTML=html;
 }
+
+// ---- broadcast chrome -------------------------------------------------------
+// The score, the corner bug and the moment card are all pure functions of the
+// playhead, exactly like everything else that follows curTick. Nothing here
+// holds state of its own, so scrubbing backwards genuinely rewinds the score
+// rather than leaving it at the final result.
+
+function scoreAt(rnd){
+  // Rounds up to AND INCLUDING rnd. A viewer that showed the final score while
+  // you watched round 3 would be telling you the ending.
+  let t=0, ct=0;
+  for(const r of (M?.rounds)||[]){
+    if(r.round_num==null || rnd==null || r.round_num>rnd) continue;
+    const w=(r.winner||"").toString().toLowerCase();
+    if(w==="t") t++; else if(w==="ct") ct++;
+  }
+  return {t,ct};
+}
+
+let lastBug="";
+function drawChrome(curTick){
+  const rnd=currentRound();
+  const {t,ct}=scoreAt(rnd);
+  const bug=[rnd,t,ct,playing?1:0,$("#c-cur").textContent].join("|");
+  if(bug===lastBug) return;
+  lastBug=bug;
+  $("#sc-t").textContent=t;
+  $("#sc-ct").textContent=ct;
+  $("#sc-rd").textContent=rnd??"—";
+  $("#stage-bug").classList.toggle("playing",playing);
+  $("#bug-txt").innerHTML=rnd==null?"—"
+    :`R<b>${rnd}</b> &nbsp;<b>${$("#c-cur").textContent}</b>`;
+}
+
+// The moment card. Same data as the rail's live death card, but this is the one
+// people look at, so it gets the swing as the biggest number on screen.
+let momentKey="";
+function drawMoment(live){
+  const el=$("#moment");
+  const key=live?String(live.tick):"";
+  if(key===momentKey) return;
+  momentKey=key;
+  if(!live){ el.classList.remove("on"); return; }
+
+  const pct=live.swing_cost_pct;
+  const val=pct==null?"—":(pct>=0?"−":"+")+Math.abs(pct).toFixed(0)+"%";
+  const tags=tagsFor(live).map(([txt,cls])=>`<span class="tag ${cls}">${esc(txt)}</span>`).join("");
+  const econ=(live.buy&&live.enemy_buy)
+    ? `${BUY_WORDS[live.buy]||live.buy} vs their ${BUY_WORDS[live.enemy_buy]||live.enemy_buy}`
+    : "";
+  const gun=live.gun_lost!=null?`$${live.gun_lost} lost to $${live.gun_risked}`:"";
+  const bits=[econ,gun].filter(Boolean).join(" · ");
+
+  el.innerHTML=`<div class="mo-wrap">
+    <div class="mo-swing">
+      <div class="v${pct!=null&&pct<0?" up":""}">${val}</div>
+      <div class="k">ROUND SWING</div>
+    </div>
+    <div class="mo-body">
+      <div class="mo-hd">
+        <span class="where">${esc(live.victim_place||"—")}<i>&larr;</i>${esc(live.attacker_place||"—")}</span>
+        <span class="wpn">${esc(live.weapon||"")}</span>
+        <span class="state">${live.alive_own}v${live.alive_enemy} · ${fmtSec(live.t)}s</span>
+      </div>
+      ${bits?`<div class="mo-ln">${bits}</div>`:""}
+      <div class="mo-tags">${tags}</div>
+    </div>
+  </div>`;
+  el.classList.add("on");
+}
+
+function fmtSec(v){ return v==null?"—":(+v).toFixed(1); }
+
+// ---- rail tabs --------------------------------------------------------------
+function showTab(id){
+  document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("on",b.dataset.pane===id));
+  document.querySelectorAll(".tabpane").forEach(p=>p.classList.toggle("on",p.id===id));
+}
+document.querySelectorAll(".tab").forEach(b=>{ b.onclick=()=>showTab(b.dataset.pane); });
 
 function currentRound(){
   if(!frames.length) return null;
@@ -2157,14 +2464,12 @@ $("#speed").onclick=()=>{speed=speed>=4?0.5:speed*2;$("#speed").textContent=spee
 function toggleCallouts(){
   showCallouts=!showCallouts;
   const b=$("#toggle-callouts");
-  b.textContent = showCallouts?"CALLOUTS ON":"CALLOUTS OFF";
   b.classList.toggle("off",!showCallouts);
   dirty=true; draw();
 }
 function toggleUtility(){
   showUtility=!showUtility;
   const b=$("#toggle-utility");
-  b.textContent = showUtility?"UTILITY ON":"UTILITY OFF";
   b.classList.toggle("off",!showUtility);
   dirty=true; draw();
 }
