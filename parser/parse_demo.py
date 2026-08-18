@@ -374,9 +374,17 @@ def parse(demo_path: Path, pov_name: str | None):
 
     # ---- build frames grouped by tick ----
     # figure out which players exist
+    # SORTED, and that is not cosmetic. polars' .unique() is hash-based and
+    # parallel, so it returns rows in a different order on every run - three
+    # parses of the same demo produced three different files. Two things break
+    # quietly as a result: the viewer selects players[0] when no --pov was
+    # given, so the default player changed between parses of the same demo; and
+    # nothing downstream can use content hashing to tell whether a re-parse
+    # actually changed anything.
     players = (
         ticks_df.select([cols["name"], cols["steamid"]] if cols["steamid"] else [cols["name"]])
         .unique()
+        .sort(cols["name"])
     )
     player_list = []
     for row in players.to_dicts():

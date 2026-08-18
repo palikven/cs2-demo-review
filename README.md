@@ -36,7 +36,7 @@ cs2coach/
   tools/mutate.py     # deliberately break the code, check the tests notice
   radars/             # radar images for the Active Duty maps
   data/               # parsed match JSONs land here
-  tests/              # 494 tests
+  tests/              # 501 tests
 ```
 
 ## One-time setup
@@ -55,17 +55,27 @@ output is already current:
 python review.py path/to/match.dem --pov "YourFaceitName"
 ```
 
-Measured on a 354 MB FACEIT demo: **~15–27s total**, of which 12–24s is the
-parse (the spread is disk cache — the demo is 354 MB). Then ~1.4s to open the
-viewer. Re-running when nothing changed is 0.0s.
+Measured on a 354 MB FACEIT demo — 22 rounds, 35 minutes of gameplay, 4,063
+position samples:
 
 ```
-parse_demo   .dem -> match.json     12.0s
-voice        comms -> opus           1.3s
-analyze      -> death review         1.3s
-career       pool every demo         0.6s
-total                               15.2s
+parse_demo   .dem -> match.json    8-24s
+voice        comms -> opus          1.3-1.7s
+analyze      -> death review        1.3-1.7s
+career       pool every demo        0.6-0.8s
+total                             ~12-28s
 ```
+
+The parse spread is the OS page cache, not the parser: a cold first read of a
+354 MB file off disk is ~24s, and ~8s once it is in RAM. Expect the cold number
+on a demo you just downloaded. Everything after the parse is small — the match
+JSON is 5.1 MB, and each later stage reads that rather than the demo.
+
+Then ~1.4s to open the viewer (343ms to fetch the 5.1 MB match, 38ms to parse
+it, 201ms for the analysis sidecar). Re-running when nothing changed is 0.0s.
+
+Parsing is **deterministic** — the same demo gives byte-identical output, so a
+content hash is a real answer to "did anything change".
 
 The stages individually, if you want them:
 
