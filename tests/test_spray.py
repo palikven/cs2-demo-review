@@ -138,3 +138,114 @@ class TestTracerGeometry:
             f"the yaw convention is wrong")
         close = sum(1 for e in errors if e < 5)
         assert close / len(errors) > 0.9
+
+
+class TestHitEndpoints:
+    """
+    A shot that connected has a known endpoint - whoever it hit. A miss does
+    not, and the difference is the whole reason tracers stopped looking like
+    they pass through people.
+
+    The demo has no bullet-impact event and no collision geometry, and the only
+    map geometry to hand is the radar image's alpha channel. That was measured
+    as a wall test and rejected: ray-marching alpha clips 18 of 151 rays that
+    provably had line of sight (a kill happened along them), at a median of 44%
+    of the way. One shot in eight cut off short of something it demonstrably
+    hit is worse than no clipping at all.
+    """
+
+    def test_every_hit_resolves_to_a_position(self, real_match):
+        shots = (real_match.get("utility") or {}).get("shots") or []
+        hits = [s for s in shots if s.get("h")]
+        if not hits:
+            pytest.skip("fixture has no recorded hits")
+        missing = [s for s in hits if "ex" not in s]
+        assert not missing, f"{len(missing)} hits have no endpoint to draw to"
+
+    def test_misses_carry_no_endpoint(self, real_match):
+        """
+        Inventing one would be a claim the demo cannot support. The viewer
+        draws misses as a short direction stub precisely because the endpoint
+        is unknown.
+        """
+        shots = (real_match.get("utility") or {}).get("shots") or []
+        for s in shots:
+            if not s.get("h"):
+                assert "ex" not in s, "a miss was given a fabricated endpoint"
+
+    def test_hit_endpoints_lie_along_the_shot_angle(self, real_match):
+        """
+        The endpoint comes from sampled positions and the angle from the event,
+        so they are two independent sources - if they disagree, one is wrong.
+        Positions are sampled every ~0.5s, so close range tolerates more
+        angular error than long range; only shots past 300u are checked.
+        """
+        import math
+        shots = (real_match.get("utility") or {}).get("shots") or []
+        errs = []
+        for s in shots:
+            if "ex" not in s:
+                continue
+            d = math.hypot(s["ex"] - s["x"], s["ey"] - s["y"])
+            if d < 300:
+                continue
+            want = math.degrees(math.atan2(s["ey"] - s["y"], s["ex"] - s["x"]))
+            errs.append(abs((s["a"] - want + 180) % 360 - 180))
+        if len(errs) < 20:
+            pytest.skip("too few long-range hits in the fixture")
+        errs.sort()
+        assert errs[len(errs) // 2] < 10.0, (
+            "hit endpoints do not sit along the shot angle - the position "
+            "lookup and the event disagree")
+
+
+class TestPositionLookup:
+    """
+    parse_demo.position_at, which resolves a hit's endpoint.
+
+    Tested directly rather than through the fixture. Two mutations of this
+    logic - fabricating an endpoint for misses, and returning the first player
+    at the tick instead of the named one - both survived a full test run when
+    the only coverage was fixture data, because a fixture cannot notice a
+    change to the code that produced it.
+    """
+
+    def _frames(self):
+        return {
+            100: [{"n": "a", "x": 0.0, "y": 0.0}, {"n": "b", "x": 50.0, "y": 5.0}],
+            132: [{"n": "a", "x": 10.0, "y": 0.0}, {"n": "b", "x": 60.0, "y": 5.0}],
+        }
+
+    def test_it_returns_the_named_player_not_the_first_one(self):
+        import parse_demo
+        f = self._frames()
+        assert parse_demo.position_at(f, sorted(f), "b", 100) == (50.0, 5.0)
+
+    def test_it_falls_back_to_a_neighbouring_sample(self):
+        """
+        Shots land on exact ticks; positions are sampled every 32, so the
+        lookup has to reach either side.
+
+        The tick is deliberately PAST the last sample: bisect then returns an
+        index off the end of the list, and only the neighbour step finds
+        anything. A tick that lands between samples does not exercise this at
+        all - the direct index already hits a frame containing the player,
+        which is how a build with no fallback passed an earlier version of
+        this test.
+        """
+        import parse_demo
+        f = self._frames()
+        last = sorted(f)[-1]
+        assert parse_demo.position_at(f, sorted(f), "a", last + 20) == (10.0, 0.0)
+        # and between two samples, which must also resolve
+        assert parse_demo.position_at(f, sorted(f), "a", 118) in (
+            (0.0, 0.0), (10.0, 0.0))
+
+    def test_an_unknown_player_is_none_not_a_guess(self):
+        import parse_demo
+        f = self._frames()
+        assert parse_demo.position_at(f, sorted(f), "ghost", 100) is None
+
+    def test_no_frames_is_none(self):
+        import parse_demo
+        assert parse_demo.position_at({}, [], "a", 100) is None

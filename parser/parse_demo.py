@@ -25,6 +25,7 @@ Design notes
 """
 
 import argparse
+import bisect
 import json
 import math
 import statistics
@@ -178,7 +179,32 @@ def timed_utility(rows, default_seconds, round_rows, tickrate):
     return out
 
 
-def parse_utility(dem, round_rows, side_by_round, tickrate=64):
+def position_at(frames_by_tick, frame_ticks, name, tick):
+    """
+    Where `name` was at (or nearest to) `tick`, from the sampled frames.
+
+    Module level rather than a closure inside parse_utility() so it can be
+    tested directly. A closure here is only reachable through the fixture, and
+    a fixture cannot notice a change to the code that generated it - which is
+    exactly how two mutations of this function survived a full test run.
+
+    Returns None when that player has no sampled position near the tick; the
+    caller must leave the endpoint off rather than substitute anything, because
+    an invented endpoint is a claim the demo does not support.
+    """
+    if not name or not frame_ticks:
+        return None
+    i = bisect.bisect_left(frame_ticks, tick)
+    for j in (i, i - 1, i + 1):
+        if 0 <= j < len(frame_ticks):
+            for e in frames_by_tick[frame_ticks[j]]:
+                if e.get("n") == name and e.get("x") is not None:
+                    return round(e["x"], 1), round(e["y"], 1)
+    return None
+
+
+def parse_utility(dem, round_rows, side_by_round, tickrate=64,
+                  frames_by_tick=None):
     """Smokes, molotovs, flashes, HEs, the bomb, and the throw arcs."""
     util = {"smokes": [], "fires": [], "flashes": [], "hes": [], "throws": []}
     bomb_events = []
@@ -317,17 +343,27 @@ def parse_utility(dem, round_rows, side_by_round, tickrate=64):
     # several pellets on one tick and produces several hurt rows, so this marks
     # the SHOT as connecting rather than counting pellets - which is the
     # question anyone actually asks.
+    # Positions are sampled every SAMPLE_EVERY_TICKS, so this is up to half a
+    # sample stale - a few units at running speed, invisible on a 900px radar
+    # and far better than a ray drawn to an arbitrary length.
+    frames_by_tick = frames_by_tick or {}
+    frame_ticks = sorted(frames_by_tick)
+
     shots = []
     inner = getattr(dem, "parser", None)
     if inner is not None:
         try:
             raw = inner.parse_event("fire_bullets")
             hurt = inner.parse_event("player_hurt")
-            hit_keys = set()
+            # (attacker, tick) -> who they hit. The NAME, because the endpoint
+            # is resolved below from sampled positions rather than trusted from
+            # the event, which carries none.
+            hit_keys = {}
             if hurt is not None and len(hurt):
                 for r in hurt.itertuples():
                     if getattr(r, "attacker_name", None):
-                        hit_keys.add((r.attacker_name, int(r.tick)))
+                        hit_keys.setdefault((r.attacker_name, int(r.tick)),
+                                            getattr(r, "user_name", None))
             if raw is not None and len(raw):
                 for r in raw.itertuples():
                     x, y = getattr(r, "origin_x", None), getattr(r, "origin_y", None)
@@ -345,8 +381,20 @@ def parse_utility(dem, round_rows, side_by_round, tickrate=64):
                         "a": round(float(getattr(r, "angles_y", 0.0)), 1),
                         "i": int(ri) if ri is not None and ri == ri else 0,
                     }
-                    if (r.user_name, int(r.tick)) in hit_keys:
+                    key = (r.user_name, int(r.tick))
+                    if key in hit_keys:
                         ev["h"] = 1
+                        # A shot that connected has a KNOWN endpoint - whoever
+                        # it hit. Drawing it to a fixed length instead is what
+                        # makes tracers look like they pass through people.
+                        # Misses get no endpoint, because we genuinely do not
+                        # know where they stopped: the demo carries no impact
+                        # event and no collision geometry.
+                        victim = hit_keys[key]
+                        pos = position_at(frames_by_tick, frame_ticks,
+                                          victim, int(r.tick))
+                        if pos:
+                            ev["ex"], ev["ey"] = pos
                     shots.append(ev)
         except Exception as exc:                       # noqa: BLE001
             print(f"[!] fire_bullets unavailable ({exc}); no spray data",
@@ -584,7 +632,8 @@ def parse(demo_path: Path, pov_name: str | None):
 
     # ---- utility ----
     utility, bomb_events = parse_utility(
-        dem, round_rows, side_by_round, header.get("tickrate") or 64)
+        dem, round_rows, side_by_round, header.get("tickrate") or 64,
+        frames_by_tick=frames)
 
     # ---- kills (for viewer event markers + stats) ----
     kill_events = []

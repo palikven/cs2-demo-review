@@ -2505,9 +2505,9 @@ function toggleCallouts(){
 // on, and recoil_index - which bullet of the spray it was. Tracers fade over
 // SHOT_TRAIL seconds so a spray reads as a burst rather than a permanent scar,
 // and a bullet that connected is drawn brighter than one that missed.
-const SHOT_HOT  = 1.4;      // seconds a shot stays at full brightness
-const SHOT_DIM  = 0.16;     // floor alpha - older shots stay readable forever
-const SHOT_LEN  = 1400;     // world units drawn along the aim ray
+const SHOT_HOT  = 0.7;      // seconds a shot stays at full brightness
+const SHOT_DIM  = 0.10;     // floor alpha - older shots stay readable forever
+const SHOT_MISS = 450;      // how far a MISS is drawn - see below
 
 // Shots ACCUMULATE across the round rather than flashing past. The first cut
 // drew a 1.4s tracer window, which measured out as nothing on screen 75% of the
@@ -2545,16 +2545,28 @@ function drawShots(curTick){
     const fresh = age<=hot ? 1-age/hot : 0;
     const alpha = SHOT_DIM + fresh*(1-SHOT_DIM);
     const a=worldToPx(sh.x,sh.y);
-    // Source yaw: 0 is +X, counter-clockwise. Canvas y grows downward, so the
-    // sine is negated - the same correction the view cones use.
-    const rad=sh.a*Math.PI/180;
-    const b=worldToPx(sh.x+Math.cos(rad)*SHOT_LEN, sh.y+Math.sin(rad)*SHOT_LEN);
+    // A shot that CONNECTED has a known endpoint - whoever it hit - so it is
+    // drawn to them and stops there. A MISS does not: the demo carries no
+    // impact event and no collision geometry, so where it actually stopped is
+    // unknown and the line is a short stub showing direction rather than a
+    // claim about where the bullet ended up. The old fixed 1400u ray was more
+    // than twice the median engagement distance (637u), which is why every
+    // tracer looked like it went through people and walls alike.
+    let b;
+    if(sh.ex!=null){
+      b=worldToPx(sh.ex,sh.ey);
+    }else{
+      // Source yaw: 0 is +X, counter-clockwise. Canvas y grows downward, so the
+      // sine is negated - the same correction the view cones use.
+      const rad=sh.a*Math.PI/180;
+      b=worldToPx(sh.x+Math.cos(rad)*SHOT_MISS, sh.y+Math.sin(rad)*SHOT_MISS);
+    }
     const mine = sh.by===povName;
-    octx.globalAlpha = alpha * (sh.h ? 0.9 : 0.5);
+    octx.globalAlpha = alpha * (sh.h ? 0.95 : 0.5);
     octx.strokeStyle = sh.h ? "#ff4d5e" : (mine ? "#3ee89a" : "#8fa0b8");
     // Deeper into a spray draws thinner: a wall of identical lines hides the
     // thing worth seeing, which is where the burst started.
-    octx.lineWidth = Math.max(0.4, (1.6 - (sh.i||0)*0.12) * (0.5+fresh*0.5));
+    octx.lineWidth = Math.max(0.7, (2.6 - (sh.i||0)*0.14) * (0.55+fresh*0.45));
     octx.beginPath(); octx.moveTo(a.x,a.y); octx.lineTo(b.x,b.y); octx.stroke();
   }
   octx.restore();

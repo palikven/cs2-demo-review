@@ -121,8 +121,18 @@ left, along the exact angle it left on. Shots **accumulate across the round**:
 the last second and a half at full strength, everything fired earlier dimmed but
 still readable, so you see the shape of where the shooting happened rather than
 a muzzle flash. Clipped to the playhead, so scrubbing back genuinely rewinds it.
-Shots that connected are red and brighter; yours are green, everyone else's
-grey. Lines thin as the spray goes on, so you can see where a burst started.
+**A shot that connected stops at whoever it hit** — the demo says who took the
+damage, so that endpoint is known rather than guessed. A miss doesn't have one,
+so it's drawn as a short stub showing direction only. Hits are red, yours are
+green, everyone else's grey, and lines thin as the spray goes on so you can see
+where a burst started.
+
+> **Why misses aren't clipped at walls:** there's no bullet-impact event in the
+> demo and no collision geometry. The only map geometry to hand is the radar
+> image's alpha channel, and that was measured and rejected — ray-marching it
+> clips 18 of 151 rays that *provably* had line of sight (a kill happened along
+> them), at a median of 44% of the way. One shot in eight cut short of something
+> it demonstrably hit is worse than not clipping at all.
 
 > The first cut faded tracers out after 1.4s, which measured out as **nothing on
 > screen 75% of the time** — 3,199 shots over 35 minutes is sparse, so pausing
