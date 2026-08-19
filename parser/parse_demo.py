@@ -307,7 +307,53 @@ def parse_utility(dem, round_rows, side_by_round, tickrate=64):
                 })
             util["throws"].sort(key=lambda t: t["s"])
 
+    # ---- every bullet ----
+    # fire_bullets carries what weapon_fire does not: the exact eye position the
+    # shot left from, the aim angles, and recoil_index - which bullet of the
+    # spray this was. That last one is the whole point: hit rate by spray depth
+    # is a coachable habit, and nothing else in the demo exposes it.
+    #
+    # Hits are joined from player_hurt on (attacker, tick). A shotgun puts
+    # several pellets on one tick and produces several hurt rows, so this marks
+    # the SHOT as connecting rather than counting pellets - which is the
+    # question anyone actually asks.
+    shots = []
+    inner = getattr(dem, "parser", None)
+    if inner is not None:
+        try:
+            raw = inner.parse_event("fire_bullets")
+            hurt = inner.parse_event("player_hurt")
+            hit_keys = set()
+            if hurt is not None and len(hurt):
+                for r in hurt.itertuples():
+                    if getattr(r, "attacker_name", None):
+                        hit_keys.add((r.attacker_name, int(r.tick)))
+            if raw is not None and len(raw):
+                for r in raw.itertuples():
+                    x, y = getattr(r, "origin_x", None), getattr(r, "origin_y", None)
+                    if x is None or x != x or y is None or y != y:
+                        continue          # NaN origin: nothing to draw
+                    ri = getattr(r, "recoil_index", None)
+                    ev = {
+                        "t": int(r.tick),
+                        "r": getattr(r, "round", None),
+                        "by": r.user_name,
+                        "x": round(float(x), 1),
+                        "y": round(float(y), 1),
+                        # angles_y is the yaw the shot left on; the frames use
+                        # the same convention, so tracers and view cones agree.
+                        "a": round(float(getattr(r, "angles_y", 0.0)), 1),
+                        "i": int(ri) if ri is not None and ri == ri else 0,
+                    }
+                    if (r.user_name, int(r.tick)) in hit_keys:
+                        ev["h"] = 1
+                    shots.append(ev)
+        except Exception as exc:                       # noqa: BLE001
+            print(f"[!] fire_bullets unavailable ({exc}); no spray data",
+                  file=sys.stderr)
+
     util["blinds"] = blinds
+    util["shots"] = shots
     counts = ", ".join(f"{k} {len(v)}" for k, v in util.items() if v)
     print(f"[*] Utility: {counts or 'none found'}, bomb events {len(bomb_events)}")
     return util, bomb_events

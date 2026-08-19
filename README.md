@@ -22,6 +22,7 @@ cs2coach/
     prices.py         # the buy-menu price table (no heavy imports)
     aim.py            # crosshair height while moving, gated on both sides
     comms.py          # was the mic open around your deaths
+    spray.py          # hit rate by depth into the spray
     kit.py            # utility still in hand when you died
     career.py         # one player pooled across every parsed demo
     roles.py          # role evidence + what each role is judged on
@@ -36,7 +37,7 @@ cs2coach/
   tools/mutate.py     # deliberately break the code, check the tests notice
   radars/             # radar images for the Active Duty maps
   data/               # parsed match JSONs land here
-  tests/              # 501 tests
+  tests/              # 522 tests
 ```
 
 ## One-time setup
@@ -107,12 +108,44 @@ what happened; a round you survived says so.
 | `C` | callout labels on/off |
 | `U` | utility on/off |
 | `V` | voice comms on/off |
+| `B` | bullets on/off |
 | `[` `]` | round buttons smaller / bigger (or the `− +` control; it's remembered) |
 
 **Utility** draws smokes and molotovs as areas for exactly as long as they were
 actually up, flashes and HEs as brief pops where they went off, the flight path
 of every grenade thrown, and a planted bomb pulsing until it's defused or
 explodes. It's drawn under the players, so smoke never hides a dot.
+
+**Bullets** (`B`) draws every shot as a tracer from the exact eye position it
+left, along the exact angle it left on, fading over ~1.4s so a spray reads as a
+burst rather than a permanent scar. Shots that connected are red and brighter;
+yours are green, everyone else's grey. Lines thin out as the spray goes on, so
+you can see where a burst started.
+
+That comes from `fire_bullets`, which carries something no other event does:
+`recoil_index` — which bullet of the spray each shot was. So hit rate by spray
+depth is computable, and on the bundled match it falls off a cliff:
+
+```
+bullet 1st    65 fired   14 hit   21.5%
+bullet 2-4   149 fired   42 hit   28.2%
+bullet 5-9   123 fired   19 hit   15.4%
+bullet 10+    68 fired    6 hit    8.8%
+```
+
+68 bullets past the tenth for six hits. "Stop spraying" is advice everyone has
+heard; that is a number. All ten players are ranked beside it, because a 20% hit
+rate means nothing until you know the rest of the server is between 13% and 25%.
+
+It can't see whether there was anything to hit — spraying a smoke to deny a push
+scores zero here and is good play — so the tail is reported as a count, never a
+verdict. And a hit is "player_hurt logged damage on that tick", so a shotgun's
+pellets count once and shotgun accuracy isn't comparable with rifle accuracy.
+Use the rank, not the absolute.
+
+```bash
+python parser/spray.py data/2v5.json
+```
 
 **Teams** splits the two sides and shows each player's live state at the
 playhead: HP bar (green → amber → red), current callout, and what they're

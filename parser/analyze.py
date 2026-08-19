@@ -612,6 +612,17 @@ def analyze(match, player=None):
             print(f"[!] comms analysis unavailable ({exc}); continuing",
                   file=sys.stderr)
 
+    # Hit rate by depth into the spray. Needs fire_bullets, which older parses
+    # do not have.
+    spray_profile = {}
+    try:
+        import spray as spraymod
+        if ((match.get("utility") or {}).get("shots")):
+            spray_profile = spraymod.profile(match, name)
+    except Exception as exc:                       # noqa: BLE001
+        print(f"[!] spray analysis unavailable ({exc}); continuing",
+              file=sys.stderr)
+
     # Evidence for the role picker - never an assignment. The viewer shows it
     # beside each name so the user chooses informed rather than blind.
     role_evidence = {}
@@ -658,6 +669,7 @@ def analyze(match, player=None):
         "kit": kit_profile,
         "aim": aim_profile,
         "comms": comms_profile,
+        "spray": spray_profile,
         "flash_table": flash_table,
         "totals": {
             "deaths": total_deaths,

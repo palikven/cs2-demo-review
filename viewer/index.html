@@ -481,6 +481,7 @@
     <div class="hdr-right">
       <button class="loadbtn" id="toggle-callouts" title="Toggle map callout labels (C)">CALLOUTS</button>
       <button class="loadbtn" id="toggle-utility" title="Toggle smokes, molotovs, flashes, HEs and throw arcs (U)">UTILITY</button>
+      <button class="loadbtn off" id="toggle-shots" title="Draw bullets fired, fading over ~1.4s (B)">BULLETS</button>
       <button class="loadbtn off" id="toggle-voice" title="Play the team's voice comms in sync (V)">VOICE</button>
       <!-- hidden until /api/status confirms a server is there to answer -->
       <button class="loadbtn off" id="toggle-chat" style="display:none" title="Talk to the coach about this match (K)">COACH</button>
@@ -651,7 +652,8 @@ let voiceOn = false;       // off until the user asks - audio should never surpr
 let voiceMuted = {};       // name -> true, per-player mute
 let voiceEls = {};         // name -> HTMLAudioElement
 let speakingNow = [];      // names talking at the current tick, for the UI
-let UTIL = {smokes:[],fires:[],flashes:[],hes:[],throws:[]};
+let UTIL = {smokes:[],fires:[],flashes:[],hes:[],throws:[],shots:[]};
+let showShots = false;      // off by default: 3,199 tracers is a lot of ink
 let BOMB = [];
 // Two separate layers, and the split matters:
 //   ANALYSIS is arithmetic from analyze.py - always true, always available.
@@ -716,8 +718,9 @@ async function loadMatch(data){
   // as an error.
   PLACES = data.places || {};
   PLACE_NAMES = data.place_names || [];
-  UTIL = Object.assign({smokes:[],fires:[],flashes:[],hes:[],throws:[]},
+  UTIL = Object.assign({smokes:[],fires:[],flashes:[],hes:[],throws:[],shots:[]},
                        data.utility||{});
+  indexShots();
   BOMB = data.bomb || [];
 
   // Sidecars, both optional. Cleared first so switching matches can't leave
@@ -1722,6 +1725,7 @@ function draw(){
   const utilTick = (nx && fr.tick!=null && nx.tick!=null)
     ? lerp(fr.tick,nx.tick,frac) : fr.tick;
   drawUtility(utilTick);
+  drawShots(utilTick);      // same interpolated tick, so tracers and smoke agree
 
   // kill flashes - aged in real milliseconds so they last the same wall-clock
   // time whether we're drawing at 2fps or 144fps
@@ -2496,6 +2500,63 @@ function toggleCallouts(){
   b.classList.toggle("off",!showCallouts);
   dirty=true; draw();
 }
+// ---- bullets ----------------------------------------------------------------
+// fire_bullets gives the exact eye position a shot left from, the yaw it left
+// on, and recoil_index - which bullet of the spray it was. Tracers fade over
+// SHOT_TRAIL seconds so a spray reads as a burst rather than a permanent scar,
+// and a bullet that connected is drawn brighter than one that missed.
+const SHOT_TRAIL = 1.4;        // seconds a tracer stays visible
+const SHOT_LEN   = 1400;       // world units drawn along the aim ray
+
+// Shots are per-tick and there are thousands, so they get bucketed by round
+// once on load. Scanning all 3,199 every frame is the difference between a
+// smooth scrub and a stuttering one.
+let SHOTS_BY_ROUND = new Map();
+function indexShots(){
+  SHOTS_BY_ROUND = new Map();
+  for(const sh of UTIL.shots||[]){
+    const r = sh.r ?? 0;
+    if(!SHOTS_BY_ROUND.has(r)) SHOTS_BY_ROUND.set(r,[]);
+    SHOTS_BY_ROUND.get(r).push(sh);
+  }
+  for(const arr of SHOTS_BY_ROUND.values()) arr.sort((a,b)=>a.t-b.t);
+}
+
+function drawShots(curTick){
+  if(!showShots || !worldToPx || curTick==null) return;
+  const rate=(M&&M.tickrate)||64;
+  const window=SHOT_TRAIL*rate;
+  const arr=SHOTS_BY_ROUND.get(currentRound()) || [];
+  const povName=(ANALYSIS&&ANALYSIS.player)||(M&&M.pov);
+
+  octx.save();
+  octx.lineCap="round";
+  for(const sh of arr){
+    const age=curTick-sh.t;
+    if(age<0 || age>window) continue;
+    const fade=1-age/window;
+    const a=worldToPx(sh.x,sh.y);
+    // Source yaw: 0 is +X, counter-clockwise. Canvas y grows downward, so the
+    // sine is negated - the same correction the view cones use.
+    const rad=sh.a*Math.PI/180;
+    const b=worldToPx(sh.x+Math.cos(rad)*SHOT_LEN, sh.y+Math.sin(rad)*SHOT_LEN);
+    const mine = sh.by===povName;
+    octx.globalAlpha = fade * (sh.h ? 0.85 : 0.4);
+    octx.strokeStyle = sh.h ? "#ff4d5e" : (mine ? "#3ee89a" : "#8fa0b8");
+    // Deeper into a spray draws thinner: a wall of identical lines hides the
+    // thing worth seeing, which is where the burst started.
+    octx.lineWidth = Math.max(0.5, 1.6 - (sh.i||0)*0.12);
+    octx.beginPath(); octx.moveTo(a.x,a.y); octx.lineTo(b.x,b.y); octx.stroke();
+  }
+  octx.restore();
+}
+
+function toggleShots(){
+  showShots=!showShots;
+  $("#toggle-shots").classList.toggle("off",!showShots);
+  dirty=true; draw();
+}
+
 function toggleUtility(){
   showUtility=!showUtility;
   const b=$("#toggle-utility");
@@ -2538,6 +2599,7 @@ setRoundSize(roundSize(),{save:false});
 $("#toggle-callouts").onclick=toggleCallouts;
 $("#toggle-utility").onclick=toggleUtility;
 $("#toggle-voice").onclick=toggleVoice;
+$("#toggle-shots").onclick=toggleShots;
 document.addEventListener("keydown",e=>{
   if(e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA") return;
   if(e.code==="Space"){e.preventDefault();$("#play").click();}
@@ -2547,6 +2609,7 @@ document.addEventListener("keydown",e=>{
   if(e.code==="KeyC"){e.preventDefault();toggleCallouts();}
   if(e.code==="KeyU"){e.preventDefault();toggleUtility();}
   if(e.code==="KeyV"){e.preventDefault();toggleVoice();}
+  if(e.code==="KeyB"){e.preventDefault();toggleShots();}
   if(e.code==="KeyK"){e.preventDefault();toggleChat();}
   // [ and ] resize the round strip. Matched to BracketLeft/Right by CODE, not
   // key, so it still works on layouts where those characters need a modifier.

@@ -110,7 +110,7 @@ class TestTimedUtility:
 class TestExportedShape:
     def test_every_kind_is_present(self, util):
         assert set(util) == {"smokes", "fires", "flashes", "hes", "throws",
-                             "blinds"}
+                             "blinds", "shots"}
 
     def test_timed_utility_has_a_valid_window(self, util):
         for key in ("smokes", "fires"):
@@ -138,13 +138,32 @@ class TestExportedShape:
             # blinds are the one kind with no position, and correctly so:
             # player_blind records who was caught and for how long, not where
             # anybody stood. Nothing draws them, so there is nothing to place.
-            if key == "blinds":
+            # blinds record who was caught, not where; shots carry an origin
+            # but are a ray rather than a placed area, and nothing treats them
+            # as one.
+            if key in ("blinds", "shots"):
                 continue
             for e in items:
                 if key == "throws":
                     assert len(e["p"]) >= 2
                 else:
                     assert e["x"] is not None and e["y"] is not None
+
+    def test_shots_carry_an_origin_an_angle_and_a_spray_index(self, util):
+        """
+        The four fields a tracer and a spray curve need. A shot with no angle
+        is undrawable; one with no recoil_index is just a shot count, which
+        weapon_fire already gave us for free.
+        """
+        for e in util["shots"]:
+            assert e["x"] is not None and e["y"] is not None
+            # Source does not normalise yaw, so it drifts slightly outside
+            # [-180, 180] - the bundled match has -180.3. cos/sin are periodic
+            # so that draws correctly; test_spray.py proves the angles actually
+            # point at what was shot. This only checks it is a real number.
+            assert -360 <= e["a"] <= 360
+            assert e["i"] >= 0
+            assert e["by"]
 
     def test_blinds_carry_who_caught_them_and_for_how_long(self, util):
         """

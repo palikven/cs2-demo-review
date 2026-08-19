@@ -317,6 +317,36 @@ def career_lines(c):
     return lines
 
 
+def _spray_lines(prof):
+    """
+    Hit rate by spray depth, with the tail called out as a count.
+
+    Never as a verdict: spraying a smoke to deny a push scores zero here and is
+    good play, and the demo cannot tell the two apart.
+    """
+    if not prof or not prof.get("fired"):
+        return []
+    lines = ["", "SPRAY (a bullet counts as connecting when player_hurt logs "
+                 "damage from them on the same tick)"]
+    lines.append(f"- {prof['player']}: {prof['hit']}/{prof['fired']} bullets "
+                 f"({prof['rate'] * 100:.0f}%), rank {prof['rank']} of "
+                 f"{prof['of']} in this match.")
+    for b in prof["buckets"]:
+        if b["fired"]:
+            lines.append(f"  - bullet {b['bucket']}: {b['fired']} fired, "
+                         f"{b['hit']} hit ({b['rate'] * 100:.0f}%).")
+    if prof.get("tail_fired"):
+        lines.append(f"- {prof['tail_fired']} bullets past the 10th for "
+                     f"{prof['tail_hit']} hits. That is where the recoil "
+                     f"pattern has gone for every rifle in the game.")
+    if prof.get("table"):
+        lines.append("- Everyone's hit rate, for scale: " + ", ".join(
+            f"{n} {v * 100:.0f}%" for n, v in prof["table"].items()
+            if v is not None))
+    lines.append(f"- {prof['note']}")
+    return lines
+
+
 def _economy_lines(prof):
     """Match totals. Sums of prices, so no significance test applies."""
     if not prof or not prof.get("deaths_priced"):
@@ -496,6 +526,7 @@ def build_facts(a, match, role=None):
     lines += _kit_lines(a.get("kit"))
     lines += _aim_lines(a.get("aim"))
     lines += _comms_lines(a.get("comms"))
+    lines += _spray_lines(a.get("spray"))
 
     lines += ["", "TOTALS",
               f"- untraded deaths: {t['untraded']} of {t['deaths']}",
