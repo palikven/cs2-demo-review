@@ -117,10 +117,17 @@ of every grenade thrown, and a planted bomb pulsing until it's defused or
 explodes. It's drawn under the players, so smoke never hides a dot.
 
 **Bullets** (`B`) draws every shot as a tracer from the exact eye position it
-left, along the exact angle it left on, fading over ~1.4s so a spray reads as a
-burst rather than a permanent scar. Shots that connected are red and brighter;
-yours are green, everyone else's grey. Lines thin out as the spray goes on, so
-you can see where a burst started.
+left, along the exact angle it left on. Shots **accumulate across the round**:
+the last second and a half at full strength, everything fired earlier dimmed but
+still readable, so you see the shape of where the shooting happened rather than
+a muzzle flash. Clipped to the playhead, so scrubbing back genuinely rewinds it.
+Shots that connected are red and brighter; yours are green, everyone else's
+grey. Lines thin as the spray goes on, so you can see where a burst started.
+
+> The first cut faded tracers out after 1.4s, which measured out as **nothing on
+> screen 75% of the time** — 3,199 shots over 35 minutes is sparse, so pausing
+> anywhere but mid-gunfight showed an empty map. Accumulating takes that to 97%;
+> the remaining 3% is before the first shot of a round, which is correct.
 
 That comes from `fire_bullets`, which carries something no other event does:
 `recoil_index` — which bullet of the spray each shot was. So hit rate by spray

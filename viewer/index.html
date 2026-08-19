@@ -2505,12 +2505,20 @@ function toggleCallouts(){
 // on, and recoil_index - which bullet of the spray it was. Tracers fade over
 // SHOT_TRAIL seconds so a spray reads as a burst rather than a permanent scar,
 // and a bullet that connected is drawn brighter than one that missed.
-const SHOT_TRAIL = 1.4;        // seconds a tracer stays visible
-const SHOT_LEN   = 1400;       // world units drawn along the aim ray
+const SHOT_HOT  = 1.4;      // seconds a shot stays at full brightness
+const SHOT_DIM  = 0.16;     // floor alpha - older shots stay readable forever
+const SHOT_LEN  = 1400;     // world units drawn along the aim ray
 
-// Shots are per-tick and there are thousands, so they get bucketed by round
-// once on load. Scanning all 3,199 every frame is the difference between a
-// smooth scrub and a stuttering one.
+// Shots ACCUMULATE across the round rather than flashing past. The first cut
+// drew a 1.4s tracer window, which measured out as nothing on screen 75% of the
+// time - 3,199 shots spread over 35 minutes is sparse, so pausing anywhere but
+// mid-gunfight showed an empty map and the feature read as broken.
+//
+// Everything fired SO FAR this round is drawn: the last second and a half at
+// full strength, everything before it dimmed to a floor. That is what makes it
+// a pattern rather than a muzzle flash. Clipped to the playhead, never past it,
+// so it stays a pure function of curTick and does not spoil what has not
+// happened yet.
 let SHOTS_BY_ROUND = new Map();
 function indexShots(){
   SHOTS_BY_ROUND = new Map();
@@ -2525,7 +2533,7 @@ function indexShots(){
 function drawShots(curTick){
   if(!showShots || !worldToPx || curTick==null) return;
   const rate=(M&&M.tickrate)||64;
-  const window=SHOT_TRAIL*rate;
+  const hot=SHOT_HOT*rate;
   const arr=SHOTS_BY_ROUND.get(currentRound()) || [];
   const povName=(ANALYSIS&&ANALYSIS.player)||(M&&M.pov);
 
@@ -2533,19 +2541,20 @@ function drawShots(curTick){
   octx.lineCap="round";
   for(const sh of arr){
     const age=curTick-sh.t;
-    if(age<0 || age>window) continue;
-    const fade=1-age/window;
+    if(age<0) break;                    // sorted, so nothing later has happened
+    const fresh = age<=hot ? 1-age/hot : 0;
+    const alpha = SHOT_DIM + fresh*(1-SHOT_DIM);
     const a=worldToPx(sh.x,sh.y);
     // Source yaw: 0 is +X, counter-clockwise. Canvas y grows downward, so the
     // sine is negated - the same correction the view cones use.
     const rad=sh.a*Math.PI/180;
     const b=worldToPx(sh.x+Math.cos(rad)*SHOT_LEN, sh.y+Math.sin(rad)*SHOT_LEN);
     const mine = sh.by===povName;
-    octx.globalAlpha = fade * (sh.h ? 0.85 : 0.4);
+    octx.globalAlpha = alpha * (sh.h ? 0.9 : 0.5);
     octx.strokeStyle = sh.h ? "#ff4d5e" : (mine ? "#3ee89a" : "#8fa0b8");
     // Deeper into a spray draws thinner: a wall of identical lines hides the
     // thing worth seeing, which is where the burst started.
-    octx.lineWidth = Math.max(0.5, 1.6 - (sh.i||0)*0.12);
+    octx.lineWidth = Math.max(0.4, (1.6 - (sh.i||0)*0.12) * (0.5+fresh*0.5));
     octx.beginPath(); octx.moveTo(a.x,a.y); octx.lineTo(b.x,b.y); octx.stroke();
   }
   octx.restore();
