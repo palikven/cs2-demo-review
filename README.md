@@ -37,7 +37,7 @@ cs2coach/
   tools/mutate.py     # deliberately break the code, check the tests notice
   radars/             # radar images for the Active Duty maps
   data/               # parsed match JSONs land here
-  tests/              # 522 tests
+  tests/              # 519 tests
 ```
 
 ## One-time setup
@@ -562,3 +562,40 @@ Callout labels are derived from the demo itself — the median position of every
 sample taken in each named area — so they appear for any map awpy can parse,
 with no hand-authored polygons. The tradeoff is that a label only shows up for
 an area somebody actually walked through in that match.
+
+## Roadmap
+
+Ordered by how much they'd change the review, not by effort.
+
+**Analyse the utility, don't just draw it.** Every smoke, molotov, flash and HE
+is already parsed with its real lifetime and throw arc, and rendered on the map
+— but nothing reads them. The question worth answering is whether a smoke did
+its job: did it block the angle you died to, was it thrown late, did the molotov
+deny the push or just burn an empty corner. The geometry is all there; the
+verdict layer is not.
+
+**Flashes that blinded nobody.** `player_blind` only fires when someone is
+actually blinded, so a flash that hit a wall never appears. That silently
+flatters the pop-flash numbers — a player who throws ten and lands four looks
+identical to one who throws four and lands four. Fixing it means reconstructing
+detonations from the projectile trace rather than the blind events.
+
+**A second LLM provider.** `server/providers/` is one file per vendor by
+design, and `anthropic_provider.py` is still the only one. The chat and coach
+layers already talk to it through a narrow interface, so a local model would
+mostly be a new file rather than a refactor.
+
+**Cover the real-API success path.** Everything up to the SDK boundary is
+tested, including the hand-written SSE parser against split, batched, malformed
+and truncated streams. The one uncovered case is a genuine 200 from Anthropic,
+which needs a key in CI.
+
+**Better round-swing calibration.** `--calibrate` reports how well the model
+predicted your own matches, but the coefficients in `parser/swing.py` are
+hand-set. Fitting them against a corpus of parsed demos would make the number
+defensible on its own terms — it still won't be HLTV's Rating 3.0, and it
+shouldn't be presented as one.
+
+**Maps beyond the nine.** Callouts are derived from the demo itself, so the
+analysis already generalises to anything awpy can parse. What's missing for a
+new map is only the radar image and its calibration entry.

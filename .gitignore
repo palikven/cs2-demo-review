@@ -17,3 +17,5 @@ __pycache__/
 
 # nothing here should ever hold a key; belt and braces
 *.key
+.env
+.env.*
