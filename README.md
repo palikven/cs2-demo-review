@@ -49,7 +49,7 @@ Python ≥ 3.11 required (awpy needs it).
 
 ## Use it
 
-**Or just drag your demo in.** Start the server, open the viewer, and hit
+**Just upload your demo.** Start the server, open the viewer, and hit
 **UPLOAD DEMO** in the header — the `.dem` goes to your own local server, which
 runs the whole pipeline and opens the match when it's done. It shows what stage
 it's on, because parsing a 354 MB demo is not instant.
