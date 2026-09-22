@@ -4,6 +4,9 @@ viewer/icons/
 
 # demos are hundreds of MB - never commit them
 *.dem
+# where the browser upload puts them. Covered by *.dem already; named so the
+# directory is obviously not repo content.
+data/demos/
 
 # parser output + caches
 data/*.json

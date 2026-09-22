@@ -49,8 +49,28 @@ Python ≥ 3.11 required (awpy needs it).
 
 ## Use it
 
-**One command.** Everything below in the right order, skipping any stage whose
-output is already current:
+**Or just drag your demo in.** Start the server, open the viewer, and hit
+**UPLOAD DEMO** in the header — the `.dem` goes to your own local server, which
+runs the whole pipeline and opens the match when it's done. It shows what stage
+it's on, because parsing a 354 MB demo is not instant.
+
+```bash
+python server/app.py
+# then open http://localhost:8000/viewer/index.html
+```
+
+The demo is kept in `data/demos/` rather than deleted after parsing: `voice.py`
+reads the demo (not the JSON), and `--force` needs it to redo anything, so
+deleting it would turn a re-run into a re-download. It's ~350 MB per match, and
+gitignored.
+
+One demo processes at a time — parsing pegs a core, and a second upload is
+refused up front with a clear message rather than after you've pushed 350 MB up
+the wire. A parsed `match.json` still works in the same picker, which is how you
+open a match somebody sent you.
+
+**Or one command**, which does the same thing from a terminal, skipping any
+stage whose output is already current:
 
 ```bash
 python review.py path/to/match.dem --pov "YourFaceitName"

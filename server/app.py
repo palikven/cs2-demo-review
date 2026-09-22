@@ -28,6 +28,7 @@ import sys
 import threading
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+import urllib.parse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -212,6 +213,12 @@ class Handler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_GET(self):
+        if self.path.startswith("/api/job/"):
+            import upload as up
+            job = up.get_job(self.path.rsplit("/", 1)[-1])
+            if job is None:
+                return self._json(404, {"error": "no such job"})
+            return self._json(200, job)
         if self.path == "/api/status":
             # Lets the viewer decide between "chat is ready", "chat needs a key
             # from you", and "there is no server at all" - three different UIs.
@@ -222,6 +229,9 @@ class Handler(SimpleHTTPRequestHandler):
                 "model": MODEL,
                 "models": [{"id": k, "label": v[0]}
                            for k, v in provider.MODELS.items()],
+                # The viewer offers a .dem picker only when a server is there
+                # to parse one - opening the page from file:// cannot.
+                "upload": True,
             })
         try:
             if self._serve_range():
@@ -262,9 +272,48 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/api/chat":
             return self._chat()
+        if self.path.split("?")[0] == "/api/upload":
+            return self._upload()
         if self.path != "/api/ask":
             return self._json(404, {"error": "no such endpoint"})
         return self._ask()
+
+    def _upload(self):
+        """
+        Take a .dem off the wire and run the pipeline on it.
+
+        The body is the raw demo, not multipart: a 350 MB file wrapped in form
+        encoding has to be re-parsed out of the stream, and the only field
+        worth having travels fine in the query string.
+        """
+        import upload as up
+
+        # Claimed before a single byte is read. Checking after the upload
+        # means the person pushes 350 MB up the wire and is then told no.
+        if not up.reserve():
+            return self._json(409, {"error": "A demo is already being "
+                                             "processed. One at a time - "
+                                             "parsing pegs a core."})
+
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        stem = up.unique_stem(up.safe_stem((q.get("name") or [""])[0]))
+        pov = (q.get("pov") or [""])[0].strip() or None
+
+        length = int(self.headers.get("Content-Length") or 0)
+        jid = up.new_job(stem)
+        dest = up.DEMO_DIR / f"{stem}.dem"
+        try:
+            ok, err = up.receive(self.rfile, length, dest)
+        except Exception:                                  # noqa: BLE001
+            up.release()
+            raise
+        if not ok:
+            up.release()
+            up._set(jid, state="failed", error=err)
+            return self._json(400, {"error": err, "job": jid})
+
+        up.start(jid, dest, pov)     # the thread releases the slot when done
+        return self._json(202, {"job": jid, "match": stem})
 
     def _chat(self):
         import chat as chatmod
