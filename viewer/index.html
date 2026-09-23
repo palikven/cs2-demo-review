@@ -495,6 +495,14 @@
     font-size:12.5px;line-height:1.5;color:var(--ink-dim)}
   .tip .vd{color:var(--ink);margin-bottom:4px}
   #chat-key{padding:12px 0;border-bottom:1px solid var(--line)}
+  .key-state{flex:1;font-family:var(--mono);font-size:11px;color:var(--ink-dim);
+    align-self:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .key-alt{background:var(--panel-2);border:1px solid var(--line);
+    color:var(--ink-faint);border-radius:7px;padding:8px 11px;cursor:pointer;
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;
+    transition:all .13s ease}
+  .key-alt:hover{color:var(--ink);border-color:var(--line-2)}
+  #chat-key-status.err{color:var(--danger)}
   #chat-key-save{font-family:var(--mono)}
   #chat-role-ev{margin-top:6px;font-family:var(--mono)}
   .chat-empty{color:var(--ink-faint);font-size:12px;line-height:1.6}
@@ -545,15 +553,27 @@
       <button class="chat-x" id="chat-close" title="Close (K or Esc)">✕</button>
     </div>
 
-    <div id="chat-key" style="display:none">
-      <div class="chat-note">
-        Paste an Anthropic API key to enable the coach. It's kept in this
-        browser's local storage and sent only to this local server, which makes
-        the call — it never goes anywhere else.
+    <div id="chat-key">
+      <!-- Shown when a key is saved. The whole block used to hide itself the
+           moment one existed, which took the status line with it - so a wrong
+           key left no row, no message and no way back. -->
+      <div class="chat-keyrow" id="chat-key-saved" style="display:none">
+        <span class="key-state" id="chat-key-state"></span>
+        <button id="chat-key-change" class="key-alt">CHANGE</button>
+        <button id="chat-key-clear" class="key-alt">CLEAR</button>
       </div>
-      <div class="chat-keyrow">
-        <input id="chat-key-input" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false">
-        <button id="chat-key-save">SAVE</button>
+
+      <div id="chat-key-entry">
+        <div class="chat-note">
+          Paste an Anthropic API key to enable the coach. It's kept in this
+          browser's local storage and sent only to this local server, which makes
+          the call — it never goes anywhere else.
+        </div>
+        <div class="chat-keyrow">
+          <input id="chat-key-input" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false">
+          <button id="chat-key-save">SAVE</button>
+          <button id="chat-key-cancel" class="key-alt" style="display:none">CANCEL</button>
+        </div>
       </div>
       <div class="chat-note" id="chat-key-status"></div>
     </div>
@@ -2228,13 +2248,51 @@ function refreshRoleUi(){
         : `<br>Not lopsided enough to suggest a role — this is one match.`);
 }
 
+// `editing` forces the input open even when a key is already stored - which is
+// the whole point: the old version hid the entire block the moment a key
+// existed, so a WRONG key could never be replaced. It took the status line with
+// it too, so there was not even a message to read.
+let keyEditing=false;
+
+function keyTail(k){
+  // Last four, the way every provider dashboard does it, so you can tell two
+  // keys apart when switching. Never the whole key: it is on screen, and the
+  // point of showing anything is identification, not recall.
+  return k.length > 4 ? "…" + k.slice(-4) : "set";
+}
+
 function refreshKeyUi(){
-  const have=!!chatKey();
-  // A server-side key still works; the panel only insists on one when there
-  // isn't one already.
-  $("#chat-key").style.display = (have||chatServerKey) ? "none" : "";
-  $("#chat-key-status").textContent = have
-    ? "Using your saved key." : (chatServerKey ? "Using the server's key." : "");
+  const k=chatKey(), have=!!k;
+  const showEntry = keyEditing || !(have || chatServerKey);
+
+  $("#chat-key-saved").style.display = (have && !keyEditing) ? "" : "none";
+  $("#chat-key-entry").style.display = showEntry ? "" : "none";
+  $("#chat-key-cancel").style.display = (have && keyEditing) ? "" : "none";
+  $("#chat-key-state").textContent = have ? `Your key ${keyTail(k)}` : "";
+
+  const st=$("#chat-key-status");
+  // Only clear a message this function did not put there. An auth error has to
+  // survive the redraw that opens the input, or it reopens with no reason why.
+  if(!st.classList.contains("err")){
+    st.textContent = have ? "" : (chatServerKey ? "Using the server's key." : "");
+  }
+}
+
+// Called when the server says the KEY is the problem (a flag on the response,
+// not a match on the message text - the wording is copy and will be reworded).
+function keyRejected(message){
+  keyEditing=true;
+  refreshKeyUi();
+  const st=$("#chat-key-status");
+  st.textContent=message;
+  st.classList.add("err");
+  toggleChat(true);
+  $("#chat-key-input").focus();
+}
+
+function clearKeyError(){
+  $("#chat-key-status").classList.remove("err");
+  $("#chat-key-status").textContent="";
 }
 
 function toggleChat(force){
@@ -2246,7 +2304,7 @@ function toggleChat(force){
   $("#toggle-chat").classList.toggle("off",!on);
   if(on){
     refreshKeyUi(); renderChips();
-    ($("#chat-key").style.display==="" ? $("#chat-key-input") : $("#chat-q")).focus();
+    ($("#chat-key-entry").style.display==="" ? $("#chat-key-input") : $("#chat-q")).focus();
   }
 }
 
@@ -2341,7 +2399,9 @@ async function sendChat(question){
     if(!r.ok || !r.body){
       const d=await r.json().catch(()=>({}));
       reply.error=true; reply.content=d.error||`Request failed (${r.status}).`;
-      reply.streaming=false; return renderChat();
+      reply.streaming=false;
+      if(d.auth) keyRejected(reply.content);
+      return renderChat();
     }
     await readSse(r.body, reply);
   }catch(err){
@@ -2378,7 +2438,12 @@ async function readSse(body, reply){
       if(!data) continue;
       let d; try{ d=JSON.parse(data); }catch{ continue; }
       if(ev==="delta"){ reply.content+=d.text||""; renderChat(); }
-      else if(ev==="error"){ reply.error=true; reply.content=d.error||"failed"; }
+      else if(ev==="error"){
+        reply.error=true; reply.content=d.error||"failed";
+        // The key is the problem, so reopen the field rather than leaving the
+        // user with a sentence and nowhere to act on it.
+        if(d.auth) keyRejected(reply.content);
+      }
       else if(ev==="done"){
         reply.usage=d.usage;
         if(d.round!=null) reply.at=`R${d.round}${d.t!=null?` · ${d.t}s`:""}`;
@@ -2408,8 +2473,23 @@ $("#chat-key-save").onclick=()=>{
   const v=$("#chat-key-input").value.trim();
   if(v) localStorage.setItem(KEY_STORE,v); else localStorage.removeItem(KEY_STORE);
   $("#chat-key-input").value="";
-  refreshKeyUi();
+  keyEditing=false; clearKeyError(); refreshKeyUi();
 };
+$("#chat-key-change").onclick=()=>{
+  keyEditing=true; clearKeyError(); refreshKeyUi(); $("#chat-key-input").focus();
+};
+$("#chat-key-cancel").onclick=()=>{
+  keyEditing=false; $("#chat-key-input").value=""; clearKeyError(); refreshKeyUi();
+};
+$("#chat-key-clear").onclick=()=>{
+  localStorage.removeItem(KEY_STORE);
+  keyEditing=false; $("#chat-key-input").value=""; clearKeyError(); refreshKeyUi();
+};
+// Enter saves, so the key can be pasted and committed without reaching for
+// the mouse - which is the entire interaction when a key has just failed.
+$("#chat-key-input").addEventListener("keydown",e=>{
+  if(e.key==="Enter"){ e.preventDefault(); $("#chat-key-save").click(); }
+});
 
 // Re-arm the kill cursor at the current position without firing anything.
 // Used after a seek or a round change so we don't replay every earlier kill.

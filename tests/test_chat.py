@@ -322,3 +322,99 @@ class TestQuestionLimits:
             real_match, "_fixture", player=real_match["pov"], tick=mid,
             question="hi")
         assert "THE MOMENT" in messages[-1]["content"]
+
+
+class TestAuthFailuresAreFlagged:
+    """
+    A rejected key has to be distinguishable from every other failure, because
+    it is the only one the user can fix from the chat panel.
+
+    The flag exists so the viewer does not string-match the message. The
+    wording is copy - it will be reworded - and a match on copy fails silently
+    when it is, leaving the user with a sentence and no way to act on it.
+    """
+
+    def test_a_rejected_key_is_marked_auth(self):
+        from providers import anthropic_provider as provider
+        err = provider.ProviderError("nope", auth=True)
+        assert err.auth is True
+
+    def test_other_failures_are_not(self):
+        """
+        Rate limits, timeouts and refusals are not the key's fault. Reopening
+        the key field for those would tell the user to fix something that is
+        not broken.
+        """
+        from providers import anthropic_provider as provider
+        assert provider.ProviderError("rate limited").auth is False
+
+    def test_the_provider_flags_both_key_failures(self):
+        """
+        AuthenticationError and PermissionDeniedError both mean "use a
+        different key", so both reopen the field.
+        """
+        src = (ROOT / "server" / "providers" / "anthropic_provider.py").read_text(
+            encoding="utf-8")
+        for exc in ("AuthenticationError", "PermissionDeniedError"):
+            block = src[src.index(f"except anthropic.{exc}"):]
+            block = block[:block.index("except anthropic.", 10)]
+            assert "auth=True" in block, f"{exc} does not flag the key"
+
+    def test_rate_limits_and_timeouts_are_not_flagged(self):
+        src = (ROOT / "server" / "providers" / "anthropic_provider.py").read_text(
+            encoding="utf-8")
+        for exc in ("RateLimitError", "APITimeoutError", "APIConnectionError"):
+            block = src[src.index(f"except anthropic.{exc}"):]
+            block = block[:block.index("raise ProviderError") + 400]
+            block = block[:block.index("from None")]
+            assert "auth=True" not in block, \
+                f"{exc} reopens the key field for a failure the key did not cause"
+
+    def test_the_no_key_response_is_flagged_too(self):
+        """
+        Same UI response as a rejected one: the field needs to open. Without
+        the flag, "no API key" leaves the panel showing nothing actionable.
+        """
+        src = (ROOT / "server" / "app.py").read_text(encoding="utf-8")
+        block = src[src.index('"No API key.'):]
+        assert '"auth": True' in block[:400]
+
+    def test_the_sse_error_carries_the_flag(self):
+        src = (ROOT / "server" / "app.py").read_text(encoding="utf-8")
+        block = src[src.index("except provider.ProviderError"):]
+        assert '"auth"' in block[:400]
+
+
+class TestKeyCanAlwaysBeChanged:
+    """
+    The bug: refreshKeyUi hid the whole #chat-key block the moment a key
+    existed - and the status line lived inside it, so a wrong key left no row,
+    no message, and no way to replace it.
+    """
+
+    def test_the_key_block_is_not_hidden_when_a_key_exists(self):
+        src = (ROOT / "viewer" / "index.html").read_text(encoding="utf-8")
+        fn = src[src.index("function refreshKeyUi"):]
+        fn = fn[:fn.index("\n}")]
+        assert '$("#chat-key").style.display' not in fn, \
+            "the whole key block is being hidden again - that is the bug"
+        for el in ("#chat-key-saved", "#chat-key-entry"):
+            assert el in fn, f"{el} is not driven by refreshKeyUi"
+
+    def test_change_clear_and_cancel_all_exist(self):
+        src = (ROOT / "viewer" / "index.html").read_text(encoding="utf-8")
+        for el in ("chat-key-change", "chat-key-clear", "chat-key-cancel"):
+            assert f'id="{el}"' in src, f"no {el} control"
+            assert f'$("#{el}").onclick' in src, f"{el} is not wired up"
+
+    def test_the_viewer_keys_off_the_flag_not_the_message(self):
+        """
+        `if (d.auth)`, never `content.includes("rejected")`. Matching the copy
+        works until somebody rewords it, and then fails silently.
+        """
+        src = (ROOT / "viewer" / "index.html").read_text(encoding="utf-8")
+        assert src.count("if(d.auth) keyRejected(") == 2, \
+            "both the SSE and the non-2xx error paths must handle auth"
+        assert "rejected" not in src.replace(
+            "function keyRejected", "").replace("keyRejected(", ""), \
+            "the viewer is matching on the error wording"

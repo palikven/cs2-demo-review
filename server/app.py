@@ -434,7 +434,7 @@ class Handler(SimpleHTTPRequestHandler):
         if not key:
             return self._json(503, {"error": "No API key. Add one in the chat "
                                              "panel, or set ANTHROPIC_API_KEY "
-                                             "on the server."})
+                                             "on the server.", "auth": True})
         try:
             req = self._read_json()
         except Exception:                              # noqa: BLE001
@@ -474,7 +474,8 @@ class Handler(SimpleHTTPRequestHandler):
                     on_delta=lambda t: self._sse("delta", {"text": t}))
             except provider.ProviderError as exc:
                 # Already vetted as safe to show - see the provider module.
-                return self._sse("error", {"error": str(exc)})
+                return self._sse("error", {"error": str(exc),
+                                           "auth": getattr(exc, "auth", False)})
             except Exception as exc:                   # noqa: BLE001
                 self.log_error("chat failed: %r", type(exc).__name__)
                 return self._sse("error", {"error": "The request failed on the "

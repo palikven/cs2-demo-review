@@ -37,7 +37,7 @@ cs2coach/
   tools/mutate.py     # deliberately break the code, check the tests notice
   radars/             # radar images for the Active Duty maps
   data/               # parsed match JSONs land here
-  tests/              # 544 tests
+  tests/              # 553 tests
 ```
 
 ## One-time setup
@@ -253,6 +253,12 @@ localhost server, which makes the provider call — provider SDKs stay server-si
 and the key never goes anywhere else. If both a browser key and a server key
 exist, the browser one wins, so you're billed on the key you connected rather
 than silently spending whatever the machine had set.
+
+The panel shows which key is in use by its last four characters, with **CHANGE**
+and **CLEAR** beside it — so a wrong key can be swapped, and you can tell two
+keys apart when switching. If Anthropic rejects the key, the field reopens on
+its own with the reason, rather than leaving you an error and nowhere to act on
+it.
 
 > `localStorage` is readable by any script on the page. That's fine for a tool
 > you run on your own machine. It would **not** be fine if you ever host this —
