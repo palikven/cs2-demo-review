@@ -22,3 +22,7 @@ __pycache__/
 *.key
 .env
 .env.*
+
+# Brag video working files. The composition pulls in a 2.7 MB music track and
+# renders an mp4; neither belongs in the repo.
+brag-output/
