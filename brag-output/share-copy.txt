@@ -1,0 +1,4 @@
+Built a CS2 demo coach that won't tell you to "work on your positioning."
+
+It tells you that you died in Main five times, four of them untraded, from four
+different angles — then refuses to guess about anything the demo can't prove.

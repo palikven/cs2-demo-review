@@ -23,6 +23,12 @@ __pycache__/
 .env
 .env.*
 
-# Brag video working files. The composition pulls in a 2.7 MB music track and
-# renders an mp4; neither belongs in the repo.
-brag-output/
+# Brag video. The SOURCE is worth keeping - the plan, the brief, the share copy
+# and the hand-authored composition are all small text with real decisions in
+# them. Only the heavy artifacts are ignored: the render, the poster, the 2.7 MB
+# music bed, the SFX, the vendored GSAP and the snapshot PNGs.
+brag-output/brag.mp4
+brag-output/brag.jpg
+brag-output/composition/assets/
+brag-output/composition/vendor/
+brag-output/composition/snapshots/
