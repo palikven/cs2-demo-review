@@ -32,3 +32,6 @@ brag-output/brag.jpg
 brag-output/composition/assets/
 brag-output/composition/vendor/
 brag-output/composition/snapshots/
+
+# Tool scratch state, not project content.
+.claude-flow/
