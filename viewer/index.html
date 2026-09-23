@@ -175,6 +175,24 @@
     font-family:var(--mono);font-size:10.5px;letter-spacing:.1em}
   .up-x:hover{color:var(--ink);border-color:var(--ink-faint)}
 
+  /* ---------------- "which of these is you?" ---------------- */
+  #whois{position:absolute;inset:0;z-index:8;display:flex;align-items:center;
+    justify-content:center;background:rgba(4,6,10,.84);backdrop-filter:blur(6px)}
+  .wi-box{width:min(460px,88%);background:linear-gradient(160deg,var(--panel-2),var(--panel));
+    border:1px solid var(--line-2);border-radius:var(--r);padding:20px 22px;
+    box-shadow:0 30px 70px -30px #000}
+  .wi-q{font-size:16px;font-weight:650;margin-bottom:6px}
+  .wi-sub{font-size:12px;color:var(--ink-dim);line-height:1.5;margin-bottom:14px}
+  .wi-list{display:flex;flex-wrap:wrap;gap:6px}
+  .wi-list button{background:var(--panel-3);border:1px solid var(--line-2);
+    color:var(--ink-dim);border-radius:7px;padding:7px 11px;cursor:pointer;
+    font-size:12px;transition:all .13s ease;font-family:var(--mono)}
+  .wi-list button:hover{border-color:var(--accent);color:var(--ink)}
+  .wi-list button:disabled{opacity:.4;cursor:default}
+  .wi-note{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);
+    margin-top:12px;min-height:14px}
+  .wi-note.err{color:var(--danger)}
+
   /* ---------------- right rail, tabbed ---------------- */
   aside{background:var(--panel);border-left:1px solid var(--line);display:flex;
     flex-direction:column;min-height:0;overflow:hidden}
@@ -504,6 +522,10 @@
     </div>
 
     <div class="hdr-right">
+      <!-- Which parsed match. Without this the only way to open one was to
+           know the ?match= URL, so the no-argument page fell to the sample. -->
+      <select id="match-pick" class="loadbtn" style="display:none"
+              title="Which parsed match to review"></select>
       <button class="loadbtn" id="toggle-callouts" title="Toggle map callout labels (C)">CALLOUTS</button>
       <button class="loadbtn" id="toggle-utility" title="Toggle smokes, molotovs, flashes, HEs and throw arcs (U)">UTILITY</button>
       <button class="loadbtn off" id="toggle-shots" title="Draw bullets fired, fading over ~1.4s (B)">BULLETS</button>
@@ -573,6 +595,19 @@
       <!-- The moment. Only rendered when the playhead is actually on a death,
            so the map is unobstructed the rest of the time. -->
       <div id="moment"></div>
+
+      <!-- Shown when a match was parsed with no --pov. analyze() then falls
+           back to the first name alphabetically, so the review is a complete,
+           correct account of a stranger - and nothing in the output says so. -->
+      <div id="whois" style="display:none">
+        <div class="wi-box">
+          <div class="wi-q">Which of these is you?</div>
+          <div class="wi-sub">This demo was uploaded without a name, so the
+            review is currently about whoever sorted first.</div>
+          <div class="wi-list" id="wi-list"></div>
+          <div class="wi-note" id="wi-note"></div>
+        </div>
+      </div>
 
       <!-- Upload + parse progress. Over the map because that is where the
            eye already is, and because the map is empty while it runs. -->
@@ -764,6 +799,7 @@ async function loadMatch(data){
   ANALYSIS = null; COACH = null; coachKey = null;
   MATCH_NAME = data._name || null;
   if(data._name) loadSidecars(data._name);
+  maybeAskWhoIsYou();
   // ?verify runs the live-stats cross-check against the parser's own totals
   // and logs the result. Cheap, and the only thing standing between the two
   // implementations of the rating maths and a silent drift.
@@ -2678,6 +2714,52 @@ document.addEventListener("keydown",e=>{
 document.addEventListener("keydown",e=>{
   if(e.key==="Escape" && $("#chat-panel").classList.contains("on")) toggleChat(false);
 });
+// ---- "which of these is you?" ----------------------------------------------
+// A demo parsed without --pov gets reviewed as players[0] - the first name
+// alphabetically. The output is complete and internally consistent and about
+// the wrong person, and nothing in it says so. This is the only place that can
+// notice, because only the viewer knows a human is looking.
+function maybeAskWhoIsYou(){
+  const box=$("#whois");
+  if(!box) return;
+  const needed = M && !M.pov && (M.players||[]).length;
+  if(!needed){ box.style.display="none"; return; }
+
+  $("#wi-note").textContent=""; $("#wi-note").classList.remove("err");
+  $("#wi-list").innerHTML = (M.players||[])
+    .map(p=>`<button data-n="${esc(p.name)}">${esc(p.name)}</button>`).join("");
+  $("#wi-list").querySelectorAll("button").forEach(b=>{
+    b.onclick=()=>setPov(b.dataset.n, b);
+  });
+  box.style.display="flex";
+}
+
+function setPov(player, btn){
+  const name = M && M._name;
+  if(!name){ $("#wi-note").textContent="this match has no name to re-analyse";
+             $("#wi-note").classList.add("err"); return; }
+  $("#wi-list").querySelectorAll("button").forEach(b=>b.disabled=true);
+  $("#wi-note").classList.remove("err");
+  $("#wi-note").textContent=`rebuilding the review for ${player}…`;
+
+  fetch("../api/pov",{method:"POST",headers:{"Content-Type":"application/json"},
+                      body:JSON.stringify({match:name, player})})
+    .then(r=>r.json().then(j=>({ok:r.ok,j})))
+    .then(({ok,j})=>{
+      if(!ok) throw new Error(j.error||"failed");
+      // The sidecar was rewritten, so re-fetch it rather than trusting what is
+      // already in memory.
+      $("#whois").style.display="none";
+      loadSidecars(name);
+      selectPlayer(player);
+    })
+    .catch(e=>{
+      $("#wi-note").textContent=String(e.message||e);
+      $("#wi-note").classList.add("err");
+      $("#wi-list").querySelectorAll("button").forEach(b=>b.disabled=false);
+    });
+}
+
 // ---- upload a demo ----------------------------------------------------------
 // The file picker used to take a parsed match.json, which meant the only way to
 // get one was to run the parser from a terminal first. A .dem goes to the local
@@ -2752,6 +2834,10 @@ function pollJob(id, matchName){
           loadMatch(d);
           showUploader(false);
           history.replaceState(null,"",`?match=${encodeURIComponent(matchName)}`);
+          // The demo we just parsed is a new entry in the list, so rebuild it
+          // rather than leaving the picker showing what existed at page load.
+          fetch("../api/matches").then(r=>r.ok?r.json():null).catch(()=>null)
+            .then(res=>buildMatchPicker((res&&res.matches)||[], matchName));
         });
         return;
       }
@@ -2776,22 +2862,68 @@ $("#file").onchange=e=>{
 };
 
 // ---- boot: load calibration, then a match if one is available ----
-// ?match=<name> loads data/<name>.json. Without it we fall back to the tiny
-// synthetic sample, which is a 1-round toy - fine as a placeholder, misleading
-// as a default when there's a real parsed match sitting in data/.
+// ?match=<name> loads data/<name>.json. WITHOUT one this used to fall straight
+// to the 1-round synthetic sample, which has no loadouts, no analysis and no
+// teams - so the page looked broken ("the weapon icons don't load") while two
+// real parsed matches sat in data/ unmentioned. Now it asks the server what
+// has been parsed and opens the newest, and the sample is only ever a
+// last resort for someone who has not parsed anything yet.
+const tryLoad = name =>
+  fetch(`../data/${name}.json`).then(r=>r.ok?r.json():null)
+    .then(d => { if(d) d._name = name; return d; }).catch(()=>null);
+
+function buildMatchPicker(list, current){
+  const sel=$("#match-pick");
+  if(!sel) return;
+  if(!list.length){ sel.style.display="none"; return; }
+  sel.style.display="";
+  sel.innerHTML = list.map(m=>{
+    const label = `${m.name} · ${(m.map||"?").replace(/^de_/,"")} · ${m.rounds}r`
+                + (m.analysed ? "" : " · not analysed");
+    return `<option value="${esc(m.name)}"${m.name===current?" selected":""}>${esc(label)}</option>`;
+  }).join("");
+  sel.onchange=()=>{
+    const n=sel.value;
+    tryLoad(n).then(d=>{
+      if(!d) return;
+      loadMatch(d);
+      history.replaceState(null,"",`?match=${encodeURIComponent(n)}`);
+    });
+  };
+}
+
 fetch(CAL_URL).then(r=>r.json()).then(c=>{CAL=c;
   const want = new URLSearchParams(location.search).get("match");
-  // _name is how loadMatch knows which sidecars to look for. A match dropped in
-  // via the file picker has no name we can derive a URL from, so it just
-  // doesn't get one and the coach panel says so.
-  const tryLoad = name =>
-    fetch(`../data/${name}.json`).then(r=>r.ok?r.json():null)
-      .then(d => { if(d) d._name = name; return d; }).catch(()=>null);
-  (want ? tryLoad(want) : Promise.resolve(null))
-    .then(d => d || tryLoad("_sample_mirage"))
-    .then(d => { if(d) loadMatch(d); });
+  fetch("../api/matches").then(r=>r.ok?r.json():null).catch(()=>null)
+    .then(res => {
+      const list = (res && res.matches) || [];
+      // Prefer what was asked for, then the most recently parsed real match,
+      // and only then the sample.
+      const pick = want || (list[0] && list[0].name);
+      buildMatchPicker(list, pick);
+      return (pick ? tryLoad(pick) : Promise.resolve(null))
+        .then(d => d || tryLoad("_sample_mirage"))
+        .then(d => {
+          if(!d) return;
+          loadMatch(d);
+          if(d._name === "_sample_mirage" && !list.length) showNoMatches();
+          else if(d._name && d._name !== want)
+            history.replaceState(null,"",`?match=${encodeURIComponent(d._name)}`);
+        });
+    });
   initChat();
 }).catch(()=>{ $("#empty").innerHTML="<div>map_calibration.json failed to load</div>";});
+
+// Nothing parsed yet: say so, and say what to do, rather than showing a
+// one-round toy that reads as a broken app.
+function showNoMatches(){
+  $("#empty").innerHTML =
+    `<div>NOTHING PARSED YET</div>
+     <div>hit <b>UPLOAD DEMO</b> above, or run
+       <code>python review.py your.dem --pov "YourName"</code></div>
+     <div style="opacity:.6">showing a one-round sample in the meantime</div>`;
+  $("#empty").style.display="";
+}
 </script>
 </body>
 </html>

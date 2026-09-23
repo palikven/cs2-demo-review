@@ -308,3 +308,71 @@ def free_space():
         return shutil.disk_usage(ROOT).free
     except OSError:
         return None
+
+
+def player_in(match, player):
+    """
+    Is this name actually one of the ten in the match?
+
+    Module level so it can be tested directly. As a bare `if` inside the
+    request handler the only coverage possible was "the error string is in the
+    source", which a build with the check deleted passes happily - the message
+    is still there, it just never fires.
+
+    It matters because analyze() resolves an unknown player back to
+    players[0], so an unchecked typo does not error: it silently re-reviews
+    the stranger this whole feature exists to stop reviewing.
+    """
+    if not player:
+        return False
+    return player in [p.get("name") for p in (match.get("players") or [])]
+
+
+def reanalyse(match_name, player):
+    """
+    Rebuild the review for a different player, and re-pool the career.
+
+    Needed because analyze() resolves a missing --pov to player_names[0] - the
+    first name alphabetically - so a demo uploaded without one is reviewed as
+    whichever stranger sorts first. Nothing about that is visible in the output:
+    it is a complete, correct review of the wrong person.
+
+    Synchronous on purpose. Re-analysing one match is ~1.5s, which is a spinner
+    rather than a job, and the caller wants the answer before it can redraw.
+    """
+    from pathlib import Path as _P
+    data = ROOT / "data"
+    match = data / f"{match_name}.json"
+    if not match.is_file() or _P(match).parent != data:
+        return False, "no such match"
+
+    # Record the choice IN THE MATCH, not just in the sidecar. Otherwise the
+    # match still says pov: null, so the viewer keeps asking who you are on
+    # every reload, and review.py keeps defaulting to players[0].
+    #
+    # Written BEFORE analyze runs, because this bumps the match's mtime and
+    # every staleness check downstream compares the sidecar against it - write
+    # it afterwards and the fresh review instantly looks stale.
+    try:
+        blob = json.loads(match.read_text(encoding="utf-8"))
+        blob["pov"] = player
+        match.write_text(json.dumps(blob), encoding="utf-8")
+    except (ValueError, OSError) as exc:
+        return False, f"could not update the match ({exc})"
+
+    r = subprocess.run(
+        [sys.executable, str(ROOT / "parser" / "analyze.py"), str(match),
+         "--player", player, "--emit"],
+        capture_output=True, text=True)
+    if r.returncode:
+        return False, explain((r.stderr or r.stdout).strip().splitlines()[-1]
+                              if (r.stderr or r.stdout).strip() else "analyze failed")
+
+    # The career pools per player, so it has to be rebuilt for the new one or
+    # the chat keeps answering "is this always a problem for me" about somebody
+    # else entirely.
+    subprocess.run(
+        [sys.executable, str(ROOT / "parser" / "career.py"),
+         "--player", player, "--emit"],
+        capture_output=True, text=True)
+    return True, None

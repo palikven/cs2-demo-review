@@ -208,8 +208,15 @@ class TestPipelineReuse:
         """
         src = (ROOT / "server" / "upload.py").read_text(encoding="utf-8")
         assert "review.py" in src
-        for stage in ("parse_demo.py", "analyze.py", "career.py"):
-            assert stage not in src, \
+        # PARSING specifically. reanalyse() calls analyze.py and career.py on
+        # purpose: re-deriving the review for a different player is a ~1.5s
+        # operation review.py cannot express, because review.py always starts
+        # from a demo and would re-parse 354 MB to redo 47 KB.
+        # Matched as an INVOCATION - the `/ "name.py"` path construction - not
+        # as a mention. Both scripts are discussed in the module docstring, and
+        # a substring search flags that prose as a call.
+        for stage in ("parse_demo.py", "voice.py"):
+            assert f'/ "{stage}"' not in src, \
                 f"upload.py invokes {stage} directly instead of through review.py"
 
     def test_review_emits_machine_readable_stages(self):

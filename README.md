@@ -37,7 +37,7 @@ cs2coach/
   tools/mutate.py     # deliberately break the code, check the tests notice
   radars/             # radar images for the Active Duty maps
   data/               # parsed match JSONs land here
-  tests/              # 519 tests
+  tests/              # 544 tests
 ```
 
 ## One-time setup
@@ -58,6 +58,17 @@ it's on, because parsing a 354 MB demo is not instant.
 python server/app.py
 # then open http://localhost:8000/viewer/index.html
 ```
+
+The viewer opens your **most recently parsed match**, and the dropdown in the
+header switches between them — no need to know the `?match=` URL. With nothing
+parsed at all it falls back to a one-round sample and says so, rather than
+looking like a broken app.
+
+If a demo was uploaded without a name, the viewer asks **which of these is you**
+and lists the ten players. That matters more than it sounds: with no POV the
+parser reviews `players[0]` — the first name alphabetically — and the output is
+a complete, internally consistent review of a stranger, with nothing anywhere
+saying so.
 
 The demo is kept in `data/demos/` rather than deleted after parsing: `voice.py`
 reads the demo (not the JSON), and `--force` needs it to redo anything, so
