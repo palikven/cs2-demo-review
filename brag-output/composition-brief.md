@@ -12,7 +12,7 @@ what it deliberately refuses to say.
 - Composition directory: `brag-output/composition/`
 - Rendered video: `brag-output/brag.mp4`
 - Format: landscape — 1920x1080
-- Duration: 21s (4 scenes: 7.0 / 6.2 / 5.8 / 2.0)
+- Duration: 24.9s (4 clips: 5.6 / 12.7 / 4.7 / 2.6)
 
 ## Source Material
 
@@ -41,6 +41,9 @@ what it deliberately refuses to say.
 - `From four different angles.`
 - `reading the demo — this is the slow part`  *(the real stage string)*
 - `−24%` / `ROUND SWING`
+- `dracaen · FIVE-SEVEN · mirecoil` then `dracaen · FIVE-SEVEN · ghostline`
+  *(the two real kills 1.14s apart — the killfeed IS the re-peek)*
+- `Why did this cost 24%?` and the coach's three-line answer
 - `BRIDGE ← BRIDGE`
 - `full buy vs their eco · $2700 lost to $500`
 - `UNTRADED` / `RE-PEEK +1.1S` / `ALREADY DOWN`
@@ -105,18 +108,23 @@ Straight from `viewer/index.html` `:root`.
 Use `brag-output/brag-plan.md` as the creative contract — it carries the full
 per-scene detail, reading-time floors, and audio intent.
 
-Scene summary:
+Scene summary. Pacing rule added after the first cut: **nothing holds still
+for more than ~1.4s.** A launch video that parks on one frame for five seconds
+gets scrolled past.
 
-1. **The advice / the answer** — 7.0s — `Work on your positioning.` holds ~1.9s,
-   greys out, and is replaced by three mono lines that arrive ~1.1s apart and
+1. **The advice / the answer** — 5.6s — `Work on your positioning.` holds ~1.2s,
+   greys out, and is replaced by three mono lines arriving 0.75s apart that
    **all stay on screen** to the cut.
-2. **The app doing it** — 6.2s — a `.dem` lands, the parse stage string and
-   progress bar run ~1.6s, then the moment card **slams in on the 8.74s cue**
-   and its rows settle. The `−24%` is the biggest element on screen.
-3. **What it refuses to say** — 5.8s — a dim `WHAT IT WON'T TELL YOU` label,
-   then three refusal lines arriving on spaced cues and **accumulating**, never
-   replacing.
-4. **Logo** — 2.0s — wordmark with the real glow, one line under it.
+2. **The app doing it, then answering** — 12.7s, one continuous shot with a
+   beat roughly every second: the `.dem` lands and the parse bar runs; the
+   radar comes up with all ten players; the **killfeed** shows the teammate's
+   death; the **roster rail** slides in with every player's loadout; the moment
+   card **slams in on the 8.74s cue** as the POV death joins the feed; the rows
+   settle; then the **coach panel** slides over and answers a question in three
+   lines, the last of which is a refusal.
+3. **What it refuses to say** — 4.7s — a dim `WHAT IT WON'T TELL YOU` label,
+   then three refusal lines 0.7s apart, **accumulating**, never replacing.
+4. **Logo** — 2.6s — wordmark with the real glow, one line under it.
 
 ## Audio
 
@@ -177,11 +185,15 @@ only on product positioning, copy, tone, source material and moment selection.
 Requirements:
 
 - Show real UI from the project — the moment card is non-negotiable and is the
-  centrepiece of Scene 2.
+  centrepiece of Scene 2, and the map, killfeed, per-player loadouts and coach
+  panel all have to be in there too. A positional tool that never shows a
+  position is not selling anything.
+- Every roster row, loadout, killfeed entry and callout is read out of
+  `data/2v5.json` at the frame nearest tick 109449 — not mocked up.
 - Keep every line readable: short labels ~0.8s settled, sentences ~0.3s/word
   (min ~1.2s). Scene 1's and Scene 3's sequential lines **accumulate and hold**;
   nothing is pulled before it can be read.
-- Keep total duration 15–25s (target 21s).
+- Keep total duration 15–25s (target ~25s).
 - Include the music and the sparse SFX layer.
 - Treat the audio notes as guidance, not a fixed cue sheet — choose SFX after
   the animation exists.

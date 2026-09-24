@@ -72,7 +72,7 @@ visually distinctive thing it makes.
   around it is quiet.
 
 ## Format: landscape — 1920x1080
-## Duration: 21s target
+## Duration: ~25s (24.9s as rendered)
 
 ## Visual identity (from the project)
 
