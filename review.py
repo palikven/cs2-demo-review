@@ -35,6 +35,7 @@ between adding a demo being instant and being a coffee break.
 """
 
 import argparse
+import json
 import subprocess
 import sys
 import time
@@ -54,10 +55,25 @@ def newer(out, *ins):
     return all(Path(i).exists() and t >= Path(i).stat().st_mtime for i in ins)
 
 
+# Machine-readable stage events, for callers that are not a terminal. The
+# server drives review.py rather than growing its own copy of the pipeline -
+# two definitions of "what a demo needs" would drift, and the one that drifted
+# would be the one nobody ran by hand.
+PROGRESS = False
+
+
+def _event(**kw):
+    if PROGRESS:
+        print("@@" + json.dumps(kw), flush=True)
+
+
 def run(label, cmd, skip_if=False, optional=False):
+    stage = label.split()[0]
     if skip_if:
+        _event(stage=stage, state="skipped")
         print(f"  {label:<34} skipped (up to date)")
         return 0.0
+    _event(stage=stage, state="running")
     t = time.time()
     r = subprocess.run([sys.executable, *cmd], capture_output=True, text=True)
     dt = time.time() - t
@@ -65,10 +81,13 @@ def run(label, cmd, skip_if=False, optional=False):
         tail = (r.stderr or r.stdout).strip().splitlines()
         msg = tail[-1] if tail else f"exit {r.returncode}"
         if optional:
+            _event(stage=stage, state="skipped", note=msg)
             print(f"  {label:<34} {dt:6.1f}s  skipped: {msg}")
             return dt
+        _event(stage=stage, state="failed", note=msg)
         print(f"  {label:<34} {dt:6.1f}s  FAILED: {msg}")
         raise SystemExit(r.returncode)
+    _event(stage=stage, state="done", seconds=round(dt, 1))
     print(f"  {label:<34} {dt:6.1f}s")
     return dt
 
@@ -82,7 +101,13 @@ def main():
                     help="redo every stage even if its output looks current")
     ap.add_argument("--no-voice", action="store_true",
                     help="skip the voice pass (it writes audio of real people)")
+    ap.add_argument("--progress", action="store_true",
+                    help="also emit one @@{json} line per stage, for callers "
+                         "driving this from a UI")
     args = ap.parse_args()
+
+    global PROGRESS
+    PROGRESS = args.progress
 
     demo = Path(args.demo).resolve()
     if not demo.exists():

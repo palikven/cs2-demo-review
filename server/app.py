@@ -28,6 +28,7 @@ import sys
 import threading
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+import urllib.parse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -62,7 +63,32 @@ Be direct and specific to the callouts involved. Two or three sentences. The pla
 is mid-review and wants a read, not an essay."""
 
 
-def load_match(name, _cache={}, _lock=threading.Lock()):
+_MATCH_CACHE = {}
+_MATCH_LOCK = threading.Lock()
+
+
+def forget_match(name):
+    """
+    Drop every cached derivative of one match.
+
+    Re-analysing for a different player rewrites the sidecar, but the server
+    holds the match, the chat holds a memoised brief, and the career is pooled
+    per player. Miss any of them and the review updates while the coach carries
+    on answering about the previous person.
+    """
+    with _MATCH_LOCK:
+        _MATCH_CACHE.pop(name, None)
+    try:
+        import chat as chatmod
+        with chatmod._brief_lock:
+            chatmod._brief_cache.clear()
+        with chatmod._career_lock:
+            chatmod._career_cache.clear()
+    except Exception:                                      # noqa: BLE001
+        pass
+
+
+def load_match(name, _cache=_MATCH_CACHE, _lock=_MATCH_LOCK):
     """Match JSONs are megabytes; parse each one once per process."""
     with _lock:
         if name not in _cache:
@@ -78,6 +104,57 @@ def load_match(name, _cache={}, _lock=threading.Lock()):
             import analyze as _analyze
             _cache[name] = _analyze.load_match(path)
         return _cache[name]
+
+
+# name -> (mtime, meta). A match JSON is ~5 MB and the listing needs four
+# fields out of it; measured, parsing two took 154 ms, so twenty would put
+# 1.5s of JSON parsing in front of every page load for a dropdown. Keyed on
+# mtime so a re-parse is picked up and nothing else costs anything.
+_MATCH_META = {}
+
+
+def _match_meta(path):
+    stem, mtime = path.stem, path.stat().st_mtime
+    hit = _MATCH_META.get(stem)
+    if hit and hit[0] == mtime:
+        return hit[1]
+    try:
+        head = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+    if not head.get("rounds"):
+        return None
+    meta = {"name": stem, "map": head.get("map"), "pov": head.get("pov"),
+            "rounds": len(head.get("rounds") or []), "mtime": mtime}
+    _MATCH_META[stem] = (mtime, meta)
+    return meta
+
+
+def _list_matches():
+    """
+    Parsed matches in data/, newest first.
+
+    Sidecars are excluded by suffix, the same way career.find_matches does it -
+    an _analysis.json has no `rounds` and would list as an empty match.
+    """
+    out = []
+    data = ROOT / "data"
+    if not data.is_dir():
+        return out
+    for path in data.glob("*.json"):
+        stem = path.stem
+        if stem.startswith("_") or any(
+                stem.endswith(sfx) for sfx in
+                ("_analysis", "_voice", "_coach", "_notes")) or stem == "career":
+            continue
+        meta = _match_meta(path)
+        if not meta:
+            continue
+        # Checked every time rather than cached: analysing is what the POV
+        # picker does, and a stale "not analysed" label would survive it.
+        out.append(dict(meta,
+                        analysed=(data / f"{stem}_analysis.json").exists()))
+    return sorted(out, key=lambda m: -m["mtime"])
 
 
 def describe(snap):
@@ -212,6 +289,17 @@ class Handler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_GET(self):
+        if self.path.startswith("/api/job/"):
+            import upload as up
+            job = up.get_job(self.path.rsplit("/", 1)[-1])
+            if job is None:
+                return self._json(404, {"error": "no such job"})
+            return self._json(200, job)
+        if self.path == "/api/matches":
+            # The viewer had no way to find out what was parsed, so with no
+            # ?match= it fell back to the 1-round synthetic sample and looked
+            # broken: no loadouts, so no weapon icons, no teams, no analysis.
+            return self._json(200, {"matches": _list_matches()})
         if self.path == "/api/status":
             # Lets the viewer decide between "chat is ready", "chat needs a key
             # from you", and "there is no server at all" - three different UIs.
@@ -222,6 +310,9 @@ class Handler(SimpleHTTPRequestHandler):
                 "model": MODEL,
                 "models": [{"id": k, "label": v[0]}
                            for k, v in provider.MODELS.items()],
+                # The viewer offers a .dem picker only when a server is there
+                # to parse one - opening the page from file:// cannot.
+                "upload": True,
             })
         try:
             if self._serve_range():
@@ -262,9 +353,78 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/api/chat":
             return self._chat()
+        if self.path.split("?")[0] == "/api/upload":
+            return self._upload()
+        if self.path.split("?")[0] == "/api/pov":
+            return self._set_pov()
         if self.path != "/api/ask":
             return self._json(404, {"error": "no such endpoint"})
         return self._ask()
+
+    def _set_pov(self):
+        """Re-run the review for a different player in an already-parsed match."""
+        import upload as up
+        try:
+            req = self._read_json() or {}
+        except Exception:                                  # noqa: BLE001
+            return self._json(400, {"error": "bad request body"})
+
+        name = up.safe_stem(req.get("match") or "")
+        player = (req.get("player") or "").strip()
+        if not player:
+            return self._json(400, {"error": "no player given"})
+
+        match = load_match(name)
+        if match is None:
+            return self._json(404, {"error": "no such match"})
+        # The player must be IN the match. Otherwise analyze falls back to
+        # player_names[0] again and silently reviews a stranger - the exact
+        # failure this endpoint exists to fix.
+        if not up.player_in(match, player):
+            return self._json(400, {"error": f"{player} is not in this match"})
+
+        ok, err = up.reanalyse(name, player)
+        if not ok:
+            return self._json(500, {"error": err})
+        forget_match(name)
+        return self._json(200, {"match": name, "player": player})
+
+    def _upload(self):
+        """
+        Take a .dem off the wire and run the pipeline on it.
+
+        The body is the raw demo, not multipart: a 350 MB file wrapped in form
+        encoding has to be re-parsed out of the stream, and the only field
+        worth having travels fine in the query string.
+        """
+        import upload as up
+
+        # Claimed before a single byte is read. Checking after the upload
+        # means the person pushes 350 MB up the wire and is then told no.
+        if not up.reserve():
+            return self._json(409, {"error": "A demo is already being "
+                                             "processed. One at a time - "
+                                             "parsing pegs a core."})
+
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        stem = up.unique_stem(up.safe_stem((q.get("name") or [""])[0]))
+        pov = (q.get("pov") or [""])[0].strip() or None
+
+        length = int(self.headers.get("Content-Length") or 0)
+        jid = up.new_job(stem)
+        dest = up.DEMO_DIR / f"{stem}.dem"
+        try:
+            ok, err = up.receive(self.rfile, length, dest)
+        except Exception:                                  # noqa: BLE001
+            up.release()
+            raise
+        if not ok:
+            up.release()
+            up._set(jid, state="failed", error=err)
+            return self._json(400, {"error": err, "job": jid})
+
+        up.start(jid, dest, pov)     # the thread releases the slot when done
+        return self._json(202, {"job": jid, "match": stem})
 
     def _chat(self):
         import chat as chatmod
@@ -274,7 +434,7 @@ class Handler(SimpleHTTPRequestHandler):
         if not key:
             return self._json(503, {"error": "No API key. Add one in the chat "
                                              "panel, or set ANTHROPIC_API_KEY "
-                                             "on the server."})
+                                             "on the server.", "auth": True})
         try:
             req = self._read_json()
         except Exception:                              # noqa: BLE001
@@ -314,7 +474,8 @@ class Handler(SimpleHTTPRequestHandler):
                     on_delta=lambda t: self._sse("delta", {"text": t}))
             except provider.ProviderError as exc:
                 # Already vetted as safe to show - see the provider module.
-                return self._sse("error", {"error": str(exc)})
+                return self._sse("error", {"error": str(exc),
+                                           "auth": getattr(exc, "auth", False)})
             except Exception as exc:                   # noqa: BLE001
                 self.log_error("chat failed: %r", type(exc).__name__)
                 return self._sse("error", {"error": "The request failed on the "

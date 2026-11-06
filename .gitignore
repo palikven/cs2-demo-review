@@ -4,6 +4,9 @@ viewer/icons/
 
 # demos are hundreds of MB - never commit them
 *.dem
+# where the browser upload puts them. Covered by *.dem already; named so the
+# directory is obviously not repo content.
+data/demos/
 
 # parser output + caches
 data/*.json
@@ -19,3 +22,17 @@ __pycache__/
 *.key
 .env
 .env.*
+
+# Brag video. The SOURCE is worth keeping - the plan, the brief, the share copy
+# and the hand-authored composition are all small text with real decisions in
+# them. Only the heavy artifacts are ignored: the render, the poster, the 2.7 MB
+# music bed, the SFX, the vendored GSAP and the snapshot PNGs.
+brag-output/brag.mp4
+brag-output/brag.jpg
+brag-output/composition/assets/
+brag-output/composition/vendor/
+brag-output/composition/snapshots/
+brag-output/composition/renders/
+
+# Tool scratch state, not project content.
+.claude-flow/

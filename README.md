@@ -37,7 +37,7 @@ cs2coach/
   tools/mutate.py     # deliberately break the code, check the tests notice
   radars/             # radar images for the Active Duty maps
   data/               # parsed match JSONs land here
-  tests/              # 519 tests
+  tests/              # 553 tests
 ```
 
 ## One-time setup
@@ -47,10 +47,55 @@ pip install -r requirements.txt
 ```
 Python ≥ 3.11 required (awpy needs it).
 
+The radars and the level ranges for the pool maps are already in the repo. After
+a CS2 update, re-run the extractor against your own install (`pip install vpk
+pillow` first). It rewrites only the radars whose picture actually changed.
+
+```bash
+python tools/extract_radars.py
+```
+
 ## Use it
 
-**One command.** Everything below in the right order, skipping any stage whose
-output is already current:
+**Just upload your demo.** Start the server, open the viewer, and hit
+**UPLOAD DEMO** in the header — the `.dem` goes to your own local server, which
+runs the whole pipeline and opens the match when it's done. It shows what stage
+it's on, because parsing a 354 MB demo is not instant.
+
+```bash
+python server/app.py
+# then open http://localhost:8000/viewer/index.html
+```
+
+The viewer opens your **most recently parsed match**, and the dropdown in the
+header switches between them — no need to know the `?match=` URL. With nothing
+parsed at all it falls back to a one-round sample and says so, rather than
+looking like a broken app.
+
+**Maps with two levels** (Nuke, Train, Vertigo) are drawn as two panels side by
+side, upper on the left and lower on the right. From above the levels sit on top
+of each other, so one radar hides whoever is downstairs. Each player is placed on
+the level their altitude falls in, using the ranges in the game's own overview
+files, and callouts and kills follow the same rule.
+
+If a demo was uploaded without a name, the viewer asks **which of these is you**
+and lists the ten players. That matters more than it sounds: with no POV the
+parser reviews `players[0]` — the first name alphabetically — and the output is
+a complete, internally consistent review of a stranger, with nothing anywhere
+saying so.
+
+The demo is kept in `data/demos/` rather than deleted after parsing: `voice.py`
+reads the demo (not the JSON), and `--force` needs it to redo anything, so
+deleting it would turn a re-run into a re-download. It's ~350 MB per match, and
+gitignored.
+
+One demo processes at a time — parsing pegs a core, and a second upload is
+refused up front with a clear message rather than after you've pushed 350 MB up
+the wire. A parsed `match.json` still works in the same picker, which is how you
+open a match somebody sent you.
+
+**Or one command**, which does the same thing from a terminal, skipping any
+stage whose output is already current:
 
 ```bash
 python review.py path/to/match.dem --pov "YourFaceitName"
@@ -222,6 +267,12 @@ localhost server, which makes the provider call — provider SDKs stay server-si
 and the key never goes anywhere else. If both a browser key and a server key
 exist, the browser one wins, so you're billed on the key you connected rather
 than silently spending whatever the machine had set.
+
+The panel shows which key is in use by its last four characters, with **CHANGE**
+and **CLEAR** beside it — so a wrong key can be swapped, and you can tell two
+keys apart when switching. If Anthropic rejects the key, the field reopens on
+its own with the reason, rather than leaving you an error and nowhere to act on
+it.
 
 > `localStorage` is readable by any script on the page. That's fine for a tool
 > you run on your own machine. It would **not** be fine if you ever host this —
@@ -598,4 +649,7 @@ shouldn't be presented as one.
 
 **Maps beyond the nine.** Callouts are derived from the demo itself, so the
 analysis already generalises to anything awpy can parse. What's missing for a
-new map is only the radar image and its calibration entry.
+new map is its radar and calibration entry, which `tools/extract_radars.py`
+writes from the install once the map is added to its `POOL` list. A map with no
+radar still gets the full review and the team panels; it shows the message
+"radar image missing" where the map would be.

@@ -31,7 +31,18 @@ MAX_TOKENS = 1200
 
 
 class ProviderError(Exception):
-    """Anything the caller should show the user, already safe to display."""
+    """
+    Anything the caller should show the user, already safe to display.
+
+    `auth` marks the key itself as the problem, so the UI can reopen the key
+    field instead of leaving the user staring at a sentence. A flag rather than
+    the caller string-matching the message: the wording is copy, it will be
+    reworded, and nothing would fail loudly when it is.
+    """
+
+    def __init__(self, message, auth=False):
+        super().__init__(message)
+        self.auth = auth
 
 
 def stream_chat(*, api_key, model, system_blocks, messages, on_delta):
@@ -73,9 +84,12 @@ def stream_chat(*, api_key, model, system_blocks, messages, on_delta):
                 on_delta(text)
             final = stream.get_final_message()
     except anthropic.AuthenticationError:
-        raise ProviderError("That API key was rejected. Check it and try again.") from None
+        raise ProviderError("That API key was rejected. Check it and try again.",
+                            auth=True) from None
     except anthropic.PermissionDeniedError:
-        raise ProviderError("That key doesn't have access to this model.") from None
+        # Also `auth`: the fix is a different key, same as a rejected one.
+        raise ProviderError("That key doesn't have access to this model.",
+                            auth=True) from None
     except anthropic.RateLimitError:
         raise ProviderError("Rate limited by Anthropic. Wait a moment and retry.") from None
     except anthropic.APITimeoutError:

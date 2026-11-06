@@ -102,6 +102,13 @@ def num(v, default=0):
     return default if v is None else v
 
 
+def _finite(v):
+    """A rounded float, or None for a missing or NaN coordinate (JSON has no NaN)."""
+    if v is None or v != v:
+        return None
+    return round(float(v), 1)
+
+
 def clean_place(v):
     """
     Normalise a callout name, or None if the demo doesn't have one here.
@@ -175,6 +182,9 @@ def timed_utility(rows, default_seconds, round_rows, tickrate):
             ev["by"] = r["thrower_name"]
         if r.get("thrower_side") is not None:
             ev["side"] = r["thrower_side"]
+        z = _finite(r.get("Z"))
+        if z is not None:
+            ev["z"] = z
         out.append(ev)
     return out
 
@@ -188,7 +198,8 @@ def position_at(frames_by_tick, frame_ticks, name, tick):
     a fixture cannot notice a change to the code that generated it - which is
     exactly how two mutations of this function survived a full test run.
 
-    Returns None when that player has no sampled position near the tick; the
+    Returns (x, y, z), with z None when the sample carries no altitude. Returns
+    None when that player has no sampled position near the tick; the
     caller must leave the endpoint off rather than substitute anything, because
     an invented endpoint is a claim the demo does not support.
     """
@@ -199,7 +210,7 @@ def position_at(frames_by_tick, frame_ticks, name, tick):
         if 0 <= j < len(frame_ticks):
             for e in frames_by_tick[frame_ticks[j]]:
                 if e.get("n") == name and e.get("x") is not None:
-                    return round(e["x"], 1), round(e["y"], 1)
+                    return round(e["x"], 1), round(e["y"], 1), e.get("z")
     return None
 
 
@@ -236,6 +247,9 @@ def parse_utility(dem, round_rows, side_by_round, tickrate=64,
             ev = {"t": int(r["tick"]), "x": round(float(r[xk]), 1),
                   "y": round(float(r[yk]), 1),
                   "r": r.get("round_num") or round_of(r.get("tick"), round_rows)}
+            zk = "z" if "z" in cols else ("Z" if "Z" in cols else None)
+            if zk and _finite(r.get(zk)) is not None:
+                ev["z"] = _finite(r[zk])
             if "user_name" in cols:
                 ev["by"] = r.get("user_name")
             if "user_side" in cols:
@@ -288,6 +302,7 @@ def parse_utility(dem, round_rows, side_by_round, tickrate=64,
             bomb_events.append({
                 "t": int(r["tick"]), "event": r["event"],
                 "x": round(float(r["X"]), 1), "y": round(float(r["Y"]), 1),
+                "z": _finite(r.get("Z")),
                 "r": r.get("round_num"), "site": r.get("bombsite"),
                 "by": r.get("name"),
             })
@@ -329,7 +344,8 @@ def parse_utility(dem, round_rows, side_by_round, tickrate=64,
                     "r": rnd,
                     "by": thrower,
                     "side": (side_by_round.get(rnd) or {}).get(thrower),
-                    "p": [[round(float(p["X"]), 1), round(float(p["Y"]), 1)] for p in pts],
+                    "p": [[round(float(p["X"]), 1), round(float(p["Y"]), 1),
+                           _finite(p.get("Z"))] for p in pts],
                 })
             util["throws"].sort(key=lambda t: t["s"])
 
@@ -381,6 +397,9 @@ def parse_utility(dem, round_rows, side_by_round, tickrate=64,
                         "a": round(float(getattr(r, "angles_y", 0.0)), 1),
                         "i": int(ri) if ri is not None and ri == ri else 0,
                     }
+                    oz = _finite(getattr(r, "origin_z", None))
+                    if oz is not None:
+                        ev["z"] = oz
                     key = (r.user_name, int(r.tick))
                     if key in hit_keys:
                         ev["h"] = 1
@@ -394,7 +413,9 @@ def parse_utility(dem, round_rows, side_by_round, tickrate=64,
                         pos = position_at(frames_by_tick, frame_ticks,
                                           victim, int(r.tick))
                         if pos:
-                            ev["ex"], ev["ey"] = pos
+                            ev["ex"], ev["ey"], ez = pos
+                            if ez is not None:
+                                ev["ez"] = ez
                     shots.append(ev)
         except Exception as exc:                       # noqa: BLE001
             print(f"[!] fire_bullets unavailable ({exc}); no spray data",
@@ -554,10 +575,12 @@ def parse(demo_path: Path, pov_name: str | None):
                     idx = len(place_names)
                     place_index[place] = idx
                     place_names.append(place)
-                    place_points[idx] = ([], [])
+                    place_points[idx] = ([], [], [])
                 entry["pl"] = idx
                 place_points[idx][0].append(entry["x"])
                 place_points[idx][1].append(entry["y"])
+                if "z" in entry:
+                    place_points[idx][2].append(entry["z"])
         if cols["armor"] and r.get(cols["armor"]) is not None:
             armor = int(num(r[cols["armor"]]))
             if armor:
@@ -602,7 +625,7 @@ def parse(demo_path: Path, pov_name: str | None):
     # corner, and the mean of an L lands in the wall between its arms; the
     # median stays on a spot somebody actually stood.
     places = {}
-    for idx, (xs, ys) in place_points.items():
+    for idx, (xs, ys, zs) in place_points.items():
         if len(xs) < MIN_PLACE_SAMPLES:
             continue
         places[place_names[idx]] = {
@@ -610,6 +633,8 @@ def parse(demo_path: Path, pov_name: str | None):
             "y": round(statistics.median(ys), 1),
             "n": len(xs),
         }
+        if zs:
+            places[place_names[idx]]["z"] = round(statistics.median(zs), 1)
     if place_names:
         print(f"[*] {len(place_names)} callouts seen, {len(places)} with "
               f">={MIN_PLACE_SAMPLES} samples to label")

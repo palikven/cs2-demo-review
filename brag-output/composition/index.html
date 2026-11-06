@@ -1,0 +1,677 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Overwatch — CS2 Team Demo Review</title>
+    <!-- Vendored locally: the CDN fetch blew the 10s navigation budget during
+         `check`, and a render must not depend on the network anyway. -->
+    <script src="vendor/gsap.min.js"></script>
+    <style>
+      /* Palette lifted verbatim from viewer/index.html :root — this is the
+         app's own identity, not a video palette invented for the occasion. */
+      :root {
+        --bg: #07090d;
+        --panel: #0e1218;
+        --panel-2: #141a23;
+        --panel-3: #1a2130;
+        --line: #1e2634;
+        --line-2: #2b3547;
+        --ink: #eef2f8;
+        --ink-dim: #8fa0b8;
+        --ink-faint: #5d6b80;
+        --t: #f0a83c;
+        --ct: #4fa8f5;
+        --accent: #3ee89a;
+        --danger: #ff4d5e;
+        /* Both families are in the compiler's deterministic font map, so it
+           injects real @font-face rules instead of leaving the render at the
+           mercy of whatever the machine has installed. */
+        --mono: "JetBrains Mono", ui-monospace, monospace;
+        --sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        width: 1920px; height: 1080px; overflow: hidden;
+        background: var(--bg); color: var(--ink); font-family: var(--sans);
+        -webkit-font-smoothing: antialiased;
+      }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; }
+      .clip { position: absolute; inset: 0; }
+
+      /* Every scene animates an inner wrapper, never the .clip itself —
+         the runtime owns clip visibility and lint rejects tweening it. */
+      .inner { position: absolute; inset: 0; display: grid; place-items: center; }
+
+      /* ---------- Scene 1 ---------- */
+      #s1-stack { width: 1180px; position: relative; height: 420px; }
+      #s1-advice {
+        position: absolute; top: 96px; left: 0; width: 100%;
+        text-align: center; font-size: 78px; font-weight: 300;
+        letter-spacing: -0.02em; color: var(--ink); opacity: 0;
+      }
+      .s1-line {
+        font-family: var(--mono); font-size: 52px; color: var(--ink);
+        letter-spacing: -0.01em; opacity: 0; display: block; margin-bottom: 26px;
+      }
+      #s1-lines { position: absolute; top: 40px; left: 0; width: 100%; text-align: center; }
+      .s1-line .accent { color: var(--accent); }
+
+      /* ---------- Scene 2 : the app ---------- */
+      #app {
+        position: absolute; left: 160px; top: 182px;
+        width: 1600px; height: 716px;
+        background: var(--panel); border: 1px solid var(--line);
+        border-radius: 14px; overflow: hidden; opacity: 0;
+      }
+      #app-header {
+        height: 78px; display: flex; align-items: center; gap: 26px; padding: 0 24px;
+        background: linear-gradient(180deg, #10151d, #0b0e14);
+        border-bottom: 1px solid var(--line); position: relative;
+      }
+      .brand {
+        font-family: var(--mono); font-weight: 700; letter-spacing: 0.2em;
+        font-size: 17px; text-transform: uppercase; color: var(--ink-dim);
+      }
+      .brand b { color: var(--accent); }
+      #score {
+        position: absolute; left: 50%; top: 0; height: 78px;
+        transform: translateX(-50%);
+        display: flex; align-items: center; gap: 18px; font-family: var(--mono);
+      }
+      #score .sc { font-size: 40px; font-weight: 700; line-height: 1; }
+      #score .nm2 { font-size: 15px; font-weight: 700; letter-spacing: 0.16em; }
+      #score .t-side .sc, #score .t-side .nm2 { color: var(--t); }
+      #score .ct-side .sc, #score .ct-side .nm2 { color: var(--ct); }
+      #score .sep { width: 1px; height: 30px; background: var(--line-2); }
+      #score .rd {
+        font-family: var(--mono); font-size: 13px; letter-spacing: 0.16em;
+        color: var(--ink-dim); text-align: center; line-height: 1.5;
+      }
+      #score .rd b { display: block; color: var(--ink); font-size: 17px; }
+      .hdr-meta {
+        margin-left: auto; font-family: var(--mono); font-size: 14px;
+        color: var(--ink-dim); letter-spacing: 0.08em;
+      }
+
+      #app-body { display: flex; height: 520px; }
+
+      /* ---------- the roster rail, with the real loadouts ---------- */
+      #rail {
+        width: 430px; flex: 0 0 430px; border-right: 1px solid var(--line);
+        background: linear-gradient(180deg, #0d1119, #0b0e14); padding: 14px 0 0;
+      }
+      .tm-h {
+        display: flex; justify-content: space-between; align-items: center;
+        font-family: var(--mono); font-size: 13px; letter-spacing: 0.15em;
+        text-transform: uppercase; padding: 9px 14px; margin: 0 14px;
+        background: var(--panel-2); border-radius: 8px 8px 0 0;
+        color: var(--t); border-left: 2px solid var(--t);
+      }
+      .tm-h .tm-alive { color: var(--ink-dim); letter-spacing: 0.04em; text-transform: none; }
+      .tm-body {
+        margin: 0 14px; border: 1px solid var(--line); border-top: 0;
+        border-radius: 0 0 8px 8px;
+      }
+      .prow {
+        display: grid; grid-template-columns: 10px minmax(0, 1fr) 36px 52px auto;
+        gap: 9px; align-items: center; padding: 12px 13px;
+      }
+      .prow + .prow { border-top: 1px solid rgba(255, 255, 255, 0.04); }
+      .prow.pov { background: rgba(62, 232, 154, 0.07); box-shadow: inset 3px 0 0 var(--accent); }
+      .prow.dead { opacity: 0.42; }
+      .prow.dead .nm { text-decoration: line-through; text-decoration-thickness: 1px; }
+      .prow .dot-s { width: 10px; height: 10px; border-radius: 50%; background: var(--t); }
+      .nm { font-size: 19px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .pl {
+        display: block; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.11em;
+        color: var(--ink-dim); margin-top: 3px;
+      }
+      .hpn {
+        font-family: var(--mono); font-size: 14px; color: var(--ink-dim);
+        text-align: right; font-variant-numeric: tabular-nums;
+      }
+      .hpbar { display: block; height: 5px; background: var(--line); border-radius: 3px; overflow: hidden; }
+      .hpbar i { display: block; height: 100%; background: var(--accent); }
+      .hpbar i.warn { background: var(--t); }
+      .hpbar i.low { background: var(--danger); }
+      .gear { display: flex; align-items: center; gap: 3px; justify-content: flex-end; min-height: 18px; }
+      .gi { height: 15px; width: auto; opacity: 0.82; flex: none; }
+      .gi-gun { height: 18px; }
+      .gi-pistol { height: 13px; opacity: 0.66; }
+      .gi-nade { height: 14px; }
+
+      #stage-area { position: relative; flex: 1; overflow: hidden; background: #04060a; }
+
+      /* The actual de_anubis radar the app draws, same PNG from radars/.
+         Framed on the round-17 action: scale and offset are chosen so all ten
+         players sit ABOVE the lower-third rather than behind it. */
+      #radar {
+        position: absolute; left: 190px; top: -440px;
+        width: 973px; height: 973px; opacity: 0;
+      }
+      .dot {
+        position: absolute; width: 17px; height: 17px; border-radius: 50%;
+        margin: -8.5px 0 0 -8.5px; opacity: 0;
+      }
+      .dot.t  { background: var(--t);  box-shadow: 0 0 10px rgba(240, 168, 60, 0.55); }
+      .dot.ct { background: var(--ct); box-shadow: 0 0 10px rgba(79, 168, 245, 0.55); }
+      .dot.dead { background: #6b5330; box-shadow: none; opacity: 0.45; }
+
+      /* ---------- killfeed — the real #killfeed, top right of the map ------ */
+      #killfeed {
+        position: absolute; right: 14px; top: 14px; z-index: 2;
+        display: flex; flex-direction: column; gap: 6px; align-items: flex-end;
+      }
+      .kf {
+        display: flex; align-items: center; gap: 9px; padding: 8px 13px; border-radius: 8px;
+        background: rgba(8, 11, 16, 0.88); border: 1px solid var(--line);
+        font-size: 18px; opacity: 0; white-space: nowrap;
+      }
+      .kf.pov { border-color: rgba(62, 232, 154, 0.5); box-shadow: 0 0 0 1px rgba(62, 232, 154, 0.14); }
+      .kf .side-t { color: var(--t); }
+      .kf .side-ct { color: var(--ct); }
+      .kf .w { font-family: var(--mono); font-size: 14px; color: var(--ink-dim); letter-spacing: 0.08em; }
+      .kf .wicon { height: 20px; width: auto; opacity: 0.9; }
+      .kf .wicon.hs { height: 17px; }
+
+      /* upload / parse overlay */
+      #parse { position: absolute; inset: 0; display: grid; place-items: center; }
+      #parse-box { width: 520px; text-align: center; }
+      #parse-name {
+        font-family: var(--mono); font-size: 20px; color: var(--ink);
+        margin-bottom: 22px; opacity: 0;
+      }
+      #parse-bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; opacity: 0; }
+      #parse-fill { display: block; height: 100%; width: 0%; background: var(--accent); }
+      #parse-stage {
+        font-family: var(--mono); font-size: 15px; letter-spacing: 0.1em;
+        color: var(--ink-dim); margin-top: 18px; opacity: 0;
+      }
+
+      /* the moment card — the real #moment lower-third */
+      #moment {
+        position: absolute; left: 36px; right: 36px; bottom: 36px; z-index: 3;
+        border-radius: 12px; overflow: hidden; opacity: 0;
+        background: linear-gradient(105deg, rgba(9, 12, 18, 0.96), rgba(13, 18, 26, 0.9));
+        border: 1px solid var(--line-2);
+        box-shadow: 0 20px 50px -20px #000;
+      }
+      #moment::before {
+        content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+        width: 5px; background: var(--danger);
+      }
+      .mo-wrap {
+        display: grid; grid-template-columns: auto 1fr; gap: 30px;
+        padding: 22px 28px 22px 32px; align-items: center;
+      }
+      .mo-swing { text-align: center; min-width: 190px; }
+      .mo-swing .v {
+        font-family: var(--mono); font-size: 68px; font-weight: 700; line-height: 1;
+        color: var(--danger); letter-spacing: -0.02em;
+        text-shadow: 0 0 34px rgba(255, 77, 94, 0.45);
+      }
+      .mo-swing .k {
+        font-family: var(--mono); font-size: 13px; letter-spacing: 0.18em;
+        color: var(--ink-dim); margin-top: 10px;
+      }
+      .mo-body { min-width: 0; }
+      .mo-hd { display: flex; align-items: baseline; gap: 18px; margin-bottom: 11px; }
+      .mo-hd .where { font-size: 30px; font-weight: 600; letter-spacing: -0.01em; }
+      .mo-hd .where i { font-style: normal; color: var(--ink-faint); margin: 0 11px; font-size: 25px; }
+      .mo-hd .wpn { font-family: var(--mono); font-size: 18px; color: var(--ink-dim); }
+      .mo-hd .state { font-family: var(--mono); font-size: 18px; color: var(--ink-dim); margin-left: auto; }
+      #mo-econ { font-size: 21px; color: var(--ink-dim); line-height: 1.5; opacity: 0; }
+      .mo-tags { display: flex; gap: 10px; margin-top: 14px; }
+      .tag {
+        font-family: var(--mono); font-size: 14px; letter-spacing: 0.1em; padding: 7px 12px;
+        border-radius: 7px; border: 1px solid var(--line-2); color: var(--ink-dim);
+        background: var(--panel-3); text-transform: uppercase; white-space: nowrap; opacity: 0;
+      }
+      .tag.bad { color: var(--danger); border-color: rgba(255, 77, 94, 0.4); background: rgba(255, 77, 94, 0.1); }
+
+      /* the round strip */
+      #rounds {
+        height: 118px; display: flex; align-items: center; gap: 7px; padding: 0 24px;
+        background: linear-gradient(180deg, #0b0e14, #10151d); border-top: 1px solid var(--line);
+      }
+      .rbtn {
+        position: relative; width: 52px; height: 52px; border-radius: 9px;
+        border: 1px solid var(--line); background: var(--panel-2);
+        /* --ink-faint measured 3.23:1 against --panel-2 — fine in the app at
+           30px on a monitor, not fine as 52px numerals in a video someone
+           watches at thumbnail size. Stepped up to --ink-dim. */
+        color: var(--ink-dim);
+        font-family: var(--mono); font-size: 18px; flex: 0 0 auto;
+        display: grid; place-items: center;
+      }
+      .rbtn.t-win { box-shadow: inset 0 -5px 0 var(--t); }
+      .rbtn.ct-win { box-shadow: inset 0 -5px 0 var(--ct); }
+      .rbtn.flag::after {
+        content: ""; position: absolute; top: 7px; right: 7px; width: 8px; height: 8px;
+        border-radius: 50%; background: var(--danger);
+      }
+      .rbtn.active { color: #07090d; background: var(--accent); border-color: var(--accent); font-weight: 700; }
+      .rbtn.active.flag::after { background: #07090d; }
+
+      /* ---------- the coach chat slide-over ---------- */
+      #dim { position: absolute; inset: 0; background: rgba(4, 6, 10, 0.6); opacity: 0; z-index: 4; }
+      #chat {
+        position: absolute; top: 78px; right: 0; bottom: 0; width: 660px; z-index: 5;
+        background: linear-gradient(180deg, #0d1219, #0a0d13);
+        border-left: 1px solid var(--line-2); box-shadow: -40px 0 90px -40px #000;
+        display: flex; flex-direction: column;
+      }
+      .chat-head {
+        display: flex; align-items: center; gap: 12px; padding: 16px 20px;
+        border-bottom: 1px solid var(--line);
+      }
+      .chat-head .h {
+        font-family: var(--mono); font-size: 13px; letter-spacing: 0.2em;
+        text-transform: uppercase; color: var(--accent);
+      }
+      .chat-head .model {
+        margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--ink-dim);
+        border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; background: var(--panel-2);
+      }
+      #chat-log { flex: 1; padding: 20px; display: flex; flex-direction: column; gap: 18px; }
+      .at {
+        display: block; font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em;
+        color: var(--ink-dim); margin-bottom: 7px;
+      }
+      .msg { font-size: 20px; line-height: 1.6; opacity: 0; }
+      .msg.you {
+        background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+        padding: 13px 15px; color: var(--ink);
+      }
+      .msg.coach { color: var(--ink-dim); border-left: 2px solid var(--line-2); padding-left: 15px; }
+      .msg.coach p { opacity: 0; margin-bottom: 13px; }
+      .msg.coach p:last-child { margin-bottom: 0; }
+      .msg.coach p.refuse { color: var(--ink); }
+      #chat-chips { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 20px 20px; }
+      .chip {
+        background: var(--panel-2); border: 1px solid var(--line); color: var(--ink-dim);
+        border-radius: 22px; padding: 9px 15px; font-size: 15px;
+      }
+      .chip.hot { border-color: var(--accent); color: var(--ink); }
+
+      /* ---------- Scene 3 ---------- */
+      #s3-stack { width: 1320px; }
+      #s3-label {
+        font-family: var(--mono); font-size: 19px; letter-spacing: 0.24em;
+        color: var(--ink-dim); margin-bottom: 42px; opacity: 0; text-align: center;
+      }
+      .s3-line {
+        font-size: 50px; font-weight: 300; color: var(--ink); letter-spacing: -0.015em;
+        margin-bottom: 28px; opacity: 0; text-align: center;
+      }
+
+      /* ---------- Scene 4 ---------- */
+      #s4-stack { text-align: center; }
+      #s4-logo {
+        font-family: var(--mono); font-weight: 700; letter-spacing: 0.2em;
+        font-size: 72px; text-transform: uppercase; color: var(--ink-dim); opacity: 0;
+      }
+      #s4-logo b { color: var(--accent); }
+      #s4-glow {
+        position: absolute; left: 50%; top: 50%; width: 760px; height: 190px;
+        margin: -150px 0 0 -380px; border-radius: 50%; opacity: 0;
+        background: radial-gradient(ellipse at center, rgba(62, 232, 154, 0.22), rgba(62, 232, 154, 0) 70%);
+      }
+      #s4-tag { margin-top: 34px; font-size: 28px; color: var(--ink-dim); font-weight: 300; opacity: 0; }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="24.9"
+      data-width="1920"
+      data-height="1080"
+      data-fps="30"
+    >
+      <!-- ========== Scene 1 — the advice / the answer ========== -->
+      <section id="s1" class="clip" data-start="0" data-duration="5.6" data-track-index="0">
+        <div class="inner">
+          <div id="s1-stack">
+            <div id="s1-advice">Work on your positioning.</div>
+            <div id="s1-lines">
+              <span class="s1-line" id="s1-l1">You died in <span class="accent">Main</span> five times.</span>
+              <span class="s1-line" id="s1-l2">Four of them untraded.</span>
+              <span class="s1-line" id="s1-l3">From four different angles.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== Scene 2 — the app doing it, then answering ========== -->
+      <section id="s2" class="clip" data-start="5.4" data-duration="12.7" data-track-index="1">
+        <div class="inner">
+          <div id="app">
+            <div id="app-header">
+              <div class="brand">OVER<b>WATCH</b></div>
+              <div id="score">
+                <div class="t-side"><span class="nm2">T</span> <span class="sc">8</span></div>
+                <div class="sep"></div>
+                <div class="rd">ROUND<b>17</b></div>
+                <div class="sep"></div>
+                <div class="ct-side"><span class="sc">8</span> <span class="nm2">CT</span></div>
+              </div>
+              <div class="hdr-meta">MAP de_anubis</div>
+            </div>
+
+            <div id="app-body" data-layout-allow-occlusion>
+              <div id="rail">
+                <div class="tm-h">
+                  <span>T</span>
+                  <span class="tm-alive">4 alive &middot; 356 hp</span>
+                </div>
+                <div class="tm-body" id="roster"></div>
+              </div>
+
+              <div id="stage-area">
+                <img id="radar" data-layout-allow-overflow src="assets/de_anubis.png" alt="de_anubis radar" />
+                <div id="killfeed" data-layout-allow-overlap></div>
+
+                <div id="parse">
+                  <div id="parse-box">
+                    <div id="parse-name">2v5.dem &middot; 354 MB</div>
+                    <div id="parse-bar"><i id="parse-fill"></i></div>
+                    <div id="parse-stage">reading the demo — this is the slow part</div>
+                  </div>
+                </div>
+
+                <div id="moment">
+                  <div class="mo-wrap">
+                    <div class="mo-swing">
+                      <div class="v">&minus;24%</div>
+                      <div class="k">ROUND SWING</div>
+                    </div>
+                    <div class="mo-body">
+                      <div class="mo-hd">
+                        <span class="where">BRIDGE<i>&larr;</i>BRIDGE</span>
+                        <span class="wpn">five-seven</span>
+                        <span class="state">4v5 &middot; 11.0s</span>
+                      </div>
+                      <div id="mo-econ">full buy vs their eco &middot; $2700 lost to $500</div>
+                      <div class="mo-tags">
+                        <span class="tag bad">UNTRADED</span>
+                        <span class="tag bad">RE-PEEK +1.1S</span>
+                        <span class="tag">ALREADY DOWN</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div id="rounds" data-layout-allow-occlusion></div>
+
+            <div id="dim"></div>
+            <div id="chat" data-layout-allow-overflow data-layout-allow-overlap>
+              <div class="chat-head">
+                <span class="h">Coach</span>
+                <span class="model" data-layout-allow-overlap>claude-opus-5</span>
+              </div>
+              <div id="chat-log">
+                <div class="msg you" id="msg-you">
+                  <span class="at">R17 &middot; TICK 109449</span>
+                  Why did this cost 24%?
+                </div>
+                <div class="msg coach" id="msg-coach">
+                  <span class="at">COACH</span>
+                  <p id="a1">You re-peeked Bridge 1.1s after it killed a teammate.</p>
+                  <p id="a2">Neither of you closed ground — you chose this duel.</p>
+                  <p id="a3" class="refuse">Where the CTs were, I won't guess.</p>
+                </div>
+              </div>
+              <div id="chat-chips">
+                <span class="chip hot">Why did this cost 24%?</span>
+                <span class="chip">Should I have taken this fight at all?</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== Scene 3 — what it refuses to say ========== -->
+      <section id="s3" class="clip" data-start="17.8" data-duration="4.7" data-track-index="2">
+        <div class="inner">
+          <div id="s3-stack">
+            <div id="s3-label">WHAT IT WON'T TELL YOU</div>
+            <div class="s3-line" id="s3-l1">Never enemy positions — you didn't have them either.</div>
+            <div class="s3-line" id="s3-l2">Never a habit from one match.</div>
+            <div class="s3-line" id="s3-l3">Never a claim the demo can't prove.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== Scene 4 — logo ========== -->
+      <section id="s4" class="clip" data-start="22.3" data-duration="2.6" data-track-index="3">
+        <div class="inner">
+          <div id="s4-glow"></div>
+          <div id="s4-stack">
+            <div id="s4-logo">OVER<b>WATCH</b></div>
+            <div id="s4-tag">It only tells you what the demo can prove.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== audio ==========
+           Music bed at a low level throughout, fading out under the logo. -->
+      <audio
+        id="bed"
+        src="assets/music/happy-beats-business-moves-vol-12-by-ende-dot-app.mp3"
+        data-start="0"
+        data-duration="24.9"
+        data-track-index="10"
+        data-automation='{"version":1,"lanes":[{"target":"volume","points":[{"t":0,"v":0},{"t":1.2,"v":0.3},{"t":22.3,"v":0.3},{"t":24.8,"v":0}]}]}'
+      ></audio>
+
+      <!-- Four SFX, each attached to something physically moving. Nothing
+           decorative: no whooshes, no risers, no stingers on text. -->
+      <audio id="sfx-drop" src="assets/sfx/drop_002.ogg" data-start="1.9"
+             data-track-index="11" data-volume="0.34"></audio>
+      <audio id="sfx-click" src="assets/sfx/click_003.ogg" data-start="5.55"
+             data-track-index="12" data-volume="0.3"></audio>
+      <!-- beat-locked: 8.74s — the single impact of the video -->
+      <audio id="sfx-slam" src="assets/sfx/impactMetal_medium_001.ogg" data-start="8.74"
+             data-track-index="13" data-volume="0.62"></audio>
+      <audio id="sfx-chat" src="assets/sfx/click_003.ogg" data-start="11.2"
+             data-track-index="14" data-volume="0.22"></audio>
+    </div>
+
+    <script>
+      // ======================================================================
+      // Everything below is the real round 17 of 2v5.dem — the roster and the
+      // loadouts read out of data/2v5.json at the frame nearest the death
+      // (tick 109440), the killfeed out of the kill list. Only the handles are
+      // substituted: the demo is a real FACEIT match and those names belong to
+      // identifiable people.
+      // ======================================================================
+
+      // ---- round strip -----------------------------------------------------
+      // Who won each round; the second field marks a round the reviewed player
+      // died in — the red dot the app draws on the timeline.
+      var ROUNDS = [
+        ["t", 1], ["t", 1], ["t", 1], ["t", 1], ["ct", 1], ["ct", 1],
+        ["ct", 0], ["t", 1], ["ct", 0], ["ct", 0], ["ct", 1], ["t", 1],
+        ["ct", 1], ["ct", 1], ["t", 0], ["t", 1], ["t", 1], ["ct", 1],
+        ["t", 0], ["t", 0], ["t", 1], ["t", 1]
+      ];
+      var strip = document.getElementById("rounds");
+      ROUNDS.forEach(function (r, i) {
+        var b = document.createElement("div");
+        b.className =
+          "rbtn " + (r[0] === "t" ? "t-win" : "ct-win") +
+          (r[1] ? " flag" : "") + (i === 16 ? " active" : "");
+        b.textContent = String(i + 1);
+        strip.appendChild(b);
+      });
+
+      // ---- the roster rail, with the loadouts the demo actually records ----
+      // Icon order is the viewer's own: primary, pistol, then nades by rank.
+      function icon(f, cls) {
+        return '<img class="' + cls + '" src="assets/icons/' + f + '.svg" alt="" />';
+      }
+      var ROSTER = [
+        { n: "ghostline", place: "BRIDGE", hp: 56, pov: true,
+          gear: ["ak47:gun", "glock:pistol", "smokegrenade:nade", "flashbang:nade", "flashbang:nade"] },
+        { n: "k0rrin", place: "RUINS", hp: 100,
+          gear: ["ak47:gun", "glock:pistol", "smokegrenade:nade", "flashbang:nade", "molotov:nade"] },
+        { n: "mirecoil", place: "", hp: 0, dead: true, gear: [] },
+        { n: "nullpath", place: "RUINS", hp: 100,
+          gear: ["ak47:gun", "deagle:pistol", "smokegrenade:nade", "flashbang:nade", "molotov:nade"] },
+        { n: "vayr", place: "BRIDGE", hp: 100,
+          gear: ["ak47:gun", "glock:pistol", "smokegrenade:nade", "flashbang:nade"] }
+      ];
+      document.getElementById("roster").innerHTML = ROSTER.map(function (p) {
+        var bar = p.hp > 60 ? "" : (p.hp > 25 ? "warn" : "low");
+        var gear = p.gear.map(function (g) {
+          var b = g.split(":");
+          return icon(b[0], "gi gi-" + b[1]);
+        }).join("");
+        return '<div class="prow' + (p.pov ? " pov" : "") + (p.dead ? " dead" : "") + '">' +
+          '<span class="dot-s"></span>' +
+          '<span><span class="nm">' + p.n + '</span>' +
+          (p.place ? '<span class="pl">' + p.place + '</span>' : "") +
+          '</span>' +
+          '<span class="hpn">' + p.hp + '</span>' +
+          '<span class="hpbar"><i class="' + bar + '" style="width:' + p.hp + '%"></i></span>' +
+          '<span class="gear">' + gear + '</span>' +
+          '</div>';
+      }).join("");
+
+      // ---- killfeed --------------------------------------------------------
+      // The two kills inside the feed's 6-second window at tick 109449. They
+      // are 73 ticks apart — 1.14s — which IS the re-peek the card flags: same
+      // CT, same five-seven, same angle, twice.
+      var KILLS = [
+        { a: "dracaen", v: "mirecoil", w: "fiveseven", label: "FIVE-SEVEN", hs: false },
+        { a: "dracaen", v: "ghostline", w: "fiveseven", label: "FIVE-SEVEN", hs: true, pov: true }
+      ];
+      document.getElementById("killfeed").innerHTML = KILLS.map(function (k) {
+        return '<div class="kf' + (k.pov ? " pov" : "") + '" data-layout-allow-overlap>' +
+          '<span class="side-ct">' + k.a + '</span>' +
+          icon(k.w, "wicon") +
+          '<span class="w">' + k.label + '</span>' +
+          (k.hs ? icon("icon_headshot", "wicon hs") : "") +
+          '<span class="side-t">' + k.v + '</span>' +
+          '</div>';
+      }).join("");
+
+      // ---- player dots on the real radar -----------------------------------
+      // Converted with the app's own map_calibration: u=(x-pos_x)/scale,
+      // v=(pos_y-y)/scale. Framed so every dot sits above the lower-third.
+      var RADAR_LEFT = 190, RADAR_TOP = -440, RADAR_SCALE = 0.95;
+      var DOTS = [
+        { u: 517.4, v: 539.5, s: "ct", a: 1 }, { u: 489.4, v: 700.9, s: "t", a: 1 },
+        { u: 507.7, v: 558.2, s: "ct", a: 1 }, { u: 542.8, v: 718.9, s: "t", a: 0 },
+        { u: 514.7, v: 484.3, s: "ct", a: 1 }, { u: 541.5, v: 698.4, s: "t", a: 1 },
+        { u: 324.1, v: 767.7, s: "t", a: 1 }, { u: 341.4, v: 758.6, s: "t", a: 1 },
+        { u: 519.0, v: 530.2, s: "ct", a: 1 }, { u: 510.2, v: 530.9, s: "ct", a: 1 }
+      ];
+      var stage = document.getElementById("stage-area");
+      DOTS.forEach(function (d) {
+        var el = document.createElement("div");
+        el.className = "dot " + d.s + (d.a ? "" : " dead");
+        el.style.left = RADAR_LEFT + d.u * RADAR_SCALE + "px";
+        el.style.top = RADAR_TOP + d.v * RADAR_SCALE + "px";
+        stage.appendChild(el);
+      });
+
+      // ======================================================================
+      // timeline — nothing holds still for more than ~1.4s
+      // ======================================================================
+      var tl = gsap.timeline({ paused: true });
+
+      // ---- Scene 1 : the advice, then the answer --------------------------
+      tl.fromTo("#s1-advice", { opacity: 0, y: 18 },
+        { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 0.2);
+      // 1.90 — the generic line greys out and drops away (sfx-drop lands here)
+      tl.to("#s1-advice",
+        { opacity: 0, y: 26, color: "#5d6b80", duration: 0.5, ease: "power2.in" }, 1.9);
+      // 0.75s apart now instead of 1.1 — they accumulate, so line 1 still gets
+      // 2.7s on screen and line 3 clears its 1.2s floor.
+      tl.fromTo("#s1-l1", { opacity: 0, y: 20 },
+        { opacity: 1, y: 0, duration: 0.4, ease: "power3.out" }, 2.2);
+      tl.fromTo("#s1-l2", { opacity: 0, y: 20 },
+        { opacity: 1, y: 0, duration: 0.4, ease: "power3.out" }, 2.95);
+      tl.fromTo("#s1-l3", { opacity: 0, y: 20 },
+        { opacity: 1, y: 0, duration: 0.4, ease: "power3.out" }, 3.7);
+      tl.to("#s1 .inner", { opacity: 0, duration: 0.2, ease: "power1.in" }, 5.35);
+
+      // ---- Scene 2a : the parse -------------------------------------------
+      tl.fromTo("#app", { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" }, 5.45);
+      tl.fromTo("#radar", { opacity: 0 }, { opacity: 0.6, duration: 0.45, ease: "power2.out" }, 5.45);
+      tl.fromTo("#parse-name", { opacity: 0, y: 12 },
+        { opacity: 1, y: 0, duration: 0.28, ease: "power2.out" }, 5.55);
+      tl.fromTo("#parse-bar", { opacity: 0 }, { opacity: 1, duration: 0.22 }, 5.75);
+      tl.fromTo("#parse-stage", { opacity: 0 }, { opacity: 1, duration: 0.22 }, 5.8);
+      tl.fromTo("#parse-fill", { width: "0%" },
+        { width: "100%", duration: 0.85, ease: "power1.inOut" }, 5.9);
+      tl.to("#parse", { opacity: 0, duration: 0.22, ease: "power1.in" }, 6.85);
+
+      // ---- Scene 2b : the map, the feed, the loadouts ----------------------
+      tl.to("#radar", { opacity: 1, duration: 0.35, ease: "power2.out" }, 6.85);
+      tl.fromTo(".dot", { opacity: 0, scale: 0.4 },
+        { opacity: 1, scale: 1, duration: 0.28, stagger: 0.03, ease: "back.out(2)" }, 6.85);
+      // the teammate's death first — the one the re-peek was into
+      tl.fromTo("#killfeed .kf:nth-child(1)", { opacity: 0, x: 22 },
+        { opacity: 1, x: 0, duration: 0.26, ease: "power3.out" }, 7.35);
+      tl.fromTo(".prow", { opacity: 0, x: -16 },
+        { opacity: 1, x: 0, duration: 0.26, stagger: 0.08, ease: "power2.out" }, 7.8);
+
+      // beat-locked: 8.74s — the POV death lands in the feed and the moment
+      // card slams in on the track's strongest early cue (intensity 0.99).
+      tl.fromTo("#killfeed .kf:nth-child(2)", { opacity: 0, x: 22 },
+        { opacity: 1, x: 0, duration: 0.26, ease: "power3.out" }, 8.74);
+      tl.fromTo("#moment", { opacity: 0, y: 64 },
+        { opacity: 1, y: 0, duration: 0.4, ease: "power4.out" }, 8.74);
+      tl.fromTo(".mo-swing .v", { scale: 1.12 },
+        { scale: 1, duration: 0.5, ease: "power3.out" }, 8.78);
+      tl.fromTo("#mo-econ", { opacity: 0, y: 8 },
+        { opacity: 1, y: 0, duration: 0.28, ease: "power2.out" }, 9.3);
+      tl.fromTo(".mo-tags .tag", { opacity: 0, y: 10 },
+        { opacity: 1, y: 0, duration: 0.26, stagger: 0.085, ease: "power2.out" }, 9.85);
+
+      // ---- Scene 2c : you ask it something ---------------------------------
+      tl.to("#dim", { opacity: 1, duration: 0.45, ease: "power2.out" }, 11.2);
+      tl.fromTo("#chat", { xPercent: 102 },
+        { xPercent: 0, duration: 0.5, ease: "power3.out" }, 11.2);
+      tl.fromTo("#msg-you", { opacity: 0, y: 14 },
+        { opacity: 1, y: 0, duration: 0.28, ease: "power2.out" }, 11.95);
+      tl.fromTo("#msg-coach", { opacity: 0 }, { opacity: 1, duration: 0.22 }, 12.45);
+      tl.fromTo("#a1", { opacity: 0, y: 10 },
+        { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" }, 12.85);
+      tl.fromTo("#a2", { opacity: 0, y: 10 },
+        { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" }, 14.05);
+      tl.fromTo("#a3", { opacity: 0, y: 10 },
+        { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" }, 15.25);
+      tl.to("#s2 .inner", { opacity: 0, duration: 0.2, ease: "power1.in" }, 17.75);
+
+      // ---- Scene 3 : the refusals ------------------------------------------
+      tl.fromTo("#s3-label", { opacity: 0 },
+        { opacity: 1, duration: 0.35, ease: "power2.out" }, 17.95);
+      tl.fromTo("#s3-l1", { opacity: 0, y: 16 },
+        { opacity: 1, y: 0, duration: 0.35, ease: "power3.out" }, 18.35);
+      tl.fromTo("#s3-l2", { opacity: 0, y: 16 },
+        { opacity: 1, y: 0, duration: 0.35, ease: "power3.out" }, 19.05);
+      tl.fromTo("#s3-l3", { opacity: 0, y: 16 },
+        { opacity: 1, y: 0, duration: 0.35, ease: "power3.out" }, 19.8);
+      tl.to("#s3 .inner", { opacity: 0, duration: 0.2, ease: "power1.in" }, 22.3);
+
+      // ---- Scene 4 : logo --------------------------------------------------
+      tl.fromTo("#s4-logo", { opacity: 0, y: 14 },
+        { opacity: 1, y: 0, duration: 0.45, ease: "power3.out" }, 22.45);
+      tl.fromTo("#s4-glow", { opacity: 0, scale: 0.9 },
+        { opacity: 1, scale: 1, duration: 0.75, ease: "power2.out" }, 22.45);
+      tl.fromTo("#s4-tag", { opacity: 0 },
+        { opacity: 1, duration: 0.4, ease: "power2.out" }, 23.0);
+
+      window.__timelines["main"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>
