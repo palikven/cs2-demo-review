@@ -277,6 +277,12 @@ class TestErrorMessages:
         assert "downloaded" in out
         assert "MalformedMessage" in out, "the raw error was thrown away"
 
+    def test_terminal_colour_codes_never_reach_the_page(self):
+        """The parser colours its output; a browser shows the escape codes as junk."""
+        out = up.explain("[1;35mDemoParser.Exception[0m: [35mMalformedMessage[0m")
+        assert "" not in out
+        assert "MalformedMessage" in out and "downloaded" in out
+
     def test_an_unrecognised_error_is_passed_through_not_swallowed(self):
         """
         Inventing a friendly message for an error nobody has seen hides the

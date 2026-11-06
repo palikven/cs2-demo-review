@@ -731,8 +731,9 @@ let allFrames = [];       // all frames
 let pos = 0, playing=false, speed=1, selected=null;
 let dirty = true;          // redraw once while paused after a seek/selection
 let lastTick = -Infinity;  // highest game tick already drawn, for kill markers
-let radarImg = new Image();
+let radarImgs = [];        // one image per level: a map with a second level has two
 let radarReady=false, worldToPx=null;
+let PANEL = {s:900, gap:0, y0:0};   // canvas px: a level's square side, gap between levels, top edge
 let killMarks=[];         // {x,y,born} on overlay - ages in milliseconds, not frames
 let PLACES = {};          // callout name -> {x,y,n} label anchor, from the parser
 let PLACE_NAMES = [];     // index -> callout name, for the per-entry `pl` field
@@ -776,14 +777,37 @@ const $ = s=>document.querySelector(s);
 const radar=$("#radar"), octx=$("#overlay").getContext("2d"), rctx=radar.getContext("2d");
 
 // ---- calibration / coordinate transform ----
+// One calibration per map, shared by every level. A map with a second level
+// (Nuke, Train, Vertigo) is drawn as one square panel per level, side by side:
+// the levels sit exactly on top of each other from above, so a player on the
+// lower one would be hidden under the upper one. A player's level comes from
+// their altitude, using the game's own overview file (CAL[map].floors).
+const PANEL_GAP = 12;   // canvas px between level panels
+function levelOf(map, z){
+  const floors = (CAL[map]||{}).floors;
+  if(!floors || z==null) return 0;
+  const i = floors.findIndex(f => z >= f.min && z < f.max);
+  return i < 0 ? 0 : i;
+}
+function inPanel(p){
+  const x0 = p.k*(PANEL.s+PANEL.gap);
+  return p.x>=x0 && p.x<=x0+PANEL.s && p.y>=PANEL.y0 && p.y<=PANEL.y0+PANEL.s;
+}
 function makeTransform(map){
   const c = CAL[map];
   if(!c){ console.warn("no calibration for",map); return null; }
   const scale = c.scale * 1024;   // radar images are 1024px source
-  return (x,y)=>({
-    x: ((x - c.pos_x)/scale) * radar.width,
-    y: ((c.pos_y - y)/scale) * radar.height
-  });
+  const levels = (c.floors||[]).length || 1;
+  const side = Math.floor((Math.min(radar.width, radar.height) - PANEL_GAP*(levels-1)) / levels);
+  PANEL = {s:side, gap:PANEL_GAP, y0:Math.floor((radar.height - side)/2)};
+  return (x,y,z)=>{
+    const k = levelOf(map, z);
+    return {
+      x: k*(side+PANEL_GAP) + ((x - c.pos_x)/scale) * side,
+      y: PANEL.y0 + ((c.pos_y - y)/scale) * side,
+      k
+    };
+  };
 }
 
 // ---- load a match object ----
@@ -795,12 +819,12 @@ async function loadMatch(data){
   $("#m-rounds").textContent = (data.stats&&data.stats.rounds_played)||data.rounds?.length||"—";
   $("#m-pov").textContent = data.pov||"—";
 
-  // radar image
+  // radar image(s): one per level. Ready only once every level has loaded.
   radarReady=false;
-  radarImg = new Image();
-  radarImg.onload=()=>{radarReady=true; draw();};
-  radarImg.onerror=()=>{radarReady=false; draw();};
-  radarImg.src = `../radars/${data.map}.png`;
+  const ready = ()=>{ radarReady = radarImgs.every(i=>i.complete && i.naturalWidth>0); draw(); };
+  const levels = (CAL[data.map]||{}).floors || [{img: `${data.map}.png`}];
+  radarImgs = levels.map(f=>{ const im=new Image(); im.onload=ready; im.onerror=ready; return im; });
+  radarImgs.forEach((im,k)=>{ im.src = `../radars/${levels[k].img}`; });
   worldToPx = makeTransform(data.map);
   preloadGrenadeIcons();
 
@@ -1014,8 +1038,8 @@ function drawCallouts(){
   for(const name of names){
     const c = PLACES[name];
     if(!c || c.x==null || c.y==null) continue;
-    const p = worldToPx(c.x, c.y);
-    if(p.x<0||p.y<0||p.x>radar.width||p.y>radar.height) continue;
+    const p = worldToPx(c.x, c.y, c.z);
+    if(!inPanel(p)) continue;
     const text = calloutLabel(name);
     // Radar art runs from near-black to near-white, so neither a light nor a
     // dark label is readable everywhere. Stroke a dark halo behind the glyphs
@@ -1059,9 +1083,12 @@ function drawUtility(curTick){
     octx.strokeStyle=utilColour(t.kind,t.side);
     octx.lineWidth=1.5; octx.setLineDash([4,3]);
     octx.beginPath();
+    let prevK=null;
     for(let i=0;i<upto;i++){
-      const p=worldToPx(pts[i][0],pts[i][1]);
-      i?octx.lineTo(p.x,p.y):octx.moveTo(p.x,p.y);
+      const p=worldToPx(pts[i][0],pts[i][1],pts[i][2]);
+      // a throw that changes level is drawn as one piece per level, never across the gap
+      if(i && p.k===prevK) octx.lineTo(p.x,p.y); else octx.moveTo(p.x,p.y);
+      prevK=p.k;
     }
     octx.stroke();
     octx.restore();
@@ -1074,14 +1101,14 @@ function drawUtility(curTick){
   for(const {t,fade} of inFlight){
     const head=throwHead(t,curTick);
     if(!head) continue;
-    const p=worldToPx(head.x,head.y);
+    const p=worldToPx(head.x,head.y,head.z);
     drawGrenadeIcon(t.kind,t.side,p.x,p.y,fade);
   }
 
   // active smokes
   for(const s of UTIL.smokes||[]){
     if(curTick<s.s || curTick>s.e) continue;
-    const p=worldToPx(s.x,s.y);
+    const p=worldToPx(s.x,s.y,s.z);
     const rpx=SMOKE_RADIUS*pxPerUnit();
     // fade the last second so it doesn't vanish mid-frame
     const left=(s.e-curTick)/rate;
@@ -1097,7 +1124,7 @@ function drawUtility(curTick){
   // active fires
   for(const f of UTIL.fires||[]){
     if(curTick<f.s || curTick>f.e) continue;
-    const p=worldToPx(f.x,f.y);
+    const p=worldToPx(f.x,f.y,f.z);
     const rpx=FIRE_RADIUS*pxPerUnit();
     const g=octx.createRadialGradient(p.x,p.y,rpx*0.2,p.x,p.y,rpx);
     g.addColorStop(0,"rgba(255,148,46,.55)");
@@ -1115,7 +1142,7 @@ function drawUtility(curTick){
     for(const e of UTIL[key]||[]){
       const age=(curTick-e.t)/(POP_SECONDS*rate);
       if(age<0||age>1) continue;
-      const p=worldToPx(e.x,e.y);
+      const p=worldToPx(e.x,e.y,e.z);
       octx.save();
       octx.strokeStyle=rgb+(1-age)+")"; octx.lineWidth=2;
       octx.beginPath(); octx.arc(p.x,p.y,6+age*maxR,0,7); octx.stroke();
@@ -1144,7 +1171,7 @@ function drawUtility(curTick){
     const done = resolved!=null && roundEnd!=null ? Math.min(resolved,roundEnd)
                : (resolved!=null ? resolved : roundEnd);
     if(curTick<b.t || (done!=null && curTick>done)) continue;
-    const p=worldToPx(b.x,b.y);
+    const p=worldToPx(b.x,b.y,b.z);
     const blink=0.55+0.45*Math.sin(curTick/rate*6);
     octx.save();
     octx.fillStyle="rgba(255,93,93,"+blink.toFixed(2)+")";
@@ -1753,7 +1780,8 @@ function throwHead(t, curTick){
   const f=frac*(pts.length-1);
   const i=Math.min(pts.length-2, Math.floor(f));
   const k=f-i;
-  return {x:lerp(pts[i][0],pts[i+1][0],k), y:lerp(pts[i][1],pts[i+1][1],k)};
+  return {x:lerp(pts[i][0],pts[i+1][0],k), y:lerp(pts[i][1],pts[i+1][1],k),
+          z: k<0.5 ? pts[i][2] : pts[i+1][2]};
 }
 
 function drawGrenadeIcon(kind, side, px, py, alpha){
@@ -1780,7 +1808,7 @@ function drawGrenadeIcon(kind, side, px, py, alpha){
 // world units -> canvas pixels, from the same calibration the transform uses
 function pxPerUnit(){
   const c=CAL[M&&M.map]; if(!c) return 0.2;
-  return radar.width/(c.scale*1024);
+  return PANEL.s/(c.scale*1024);
 }
 function utilColour(kind,side){
   if(kind==="smoke") return "rgba(214,222,234,.9)";
@@ -1791,15 +1819,33 @@ function utilColour(kind,side){
 }
 
 // ---- draw ----
+// Each level is its own panel, so say which one it is. Bottom-left, because the
+// bug in the top-left corner covers the top of the first panel.
+function drawLevelLabels(){
+  const floors=(CAL[M&&M.map]||{}).floors;
+  if(!floors || floors.length<2) return;
+  rctx.save();
+  rctx.font="600 11px "+(getCSS('--mono')||"monospace");
+  rctx.textAlign="left"; rctx.textBaseline="bottom";
+  rctx.fillStyle="rgba(190,205,225,.7)";
+  floors.forEach((f,k)=>rctx.fillText(f.name.toUpperCase(), k*(PANEL.s+PANEL.gap)+10, PANEL.y0+PANEL.s-10));
+  rctx.restore();
+}
+
 function draw(){
   rctx.clearRect(0,0,radar.width,radar.height);
-  if(radarReady){ rctx.drawImage(radarImg,0,0,radar.width,radar.height); }
+  if(radarReady){
+    radarImgs.forEach((im,k)=>rctx.drawImage(im, k*(PANEL.s+PANEL.gap), PANEL.y0, PANEL.s, PANEL.s));
+    drawLevelLabels();
+  }
   else { rctx.fillStyle="#0b0e13"; rctx.fillRect(0,0,radar.width,radar.height);
     rctx.fillStyle="#2a3444"; rctx.font="13px monospace"; rctx.textAlign="center";
     rctx.fillText("radar image missing for "+(M?.map||""), radar.width/2, radar.height/2);}
   drawCallouts();
   octx.clearRect(0,0,radar.width,radar.height);
-  if(!frames.length||!worldToPx){ drawKillfeed(null); return; }
+  if(!frames.length){ drawKillfeed(null); return; }
+  // No radar for this map: nothing to draw on, but the team panels still work.
+  if(!worldToPx){ drawKillfeed(null); updateTeams(frames[Math.max(0,Math.min(Math.floor(pos), frames.length-1))]); return; }
 
   const now = performance.now();
   const i   = Math.max(0, Math.min(Math.floor(pos), frames.length-1));
@@ -1823,7 +1869,7 @@ function draw(){
   // time whether we're drawing at 2fps or 144fps
   killMarks = killMarks.filter(k => now - k.born < KILL_MARK_MS);
   killMarks.forEach(k=>{
-    const p=worldToPx(k.x,k.y);
+    const p=worldToPx(k.x,k.y,k.z);
     const age=(now-k.born)/KILL_MARK_MS;
     octx.strokeStyle=`rgba(255,93,93,${1-age})`; octx.lineWidth=2;
     octx.beginPath(); octx.arc(p.x,p.y,6+age*22,0,7); octx.stroke();
@@ -1831,15 +1877,19 @@ function draw(){
 
   (fr.players||[]).forEach(pl=>{
     const np = next[pl.n];
-    let x=pl.x, y=pl.y, yaw=pl.yaw;
+    let x=pl.x, y=pl.y, z=pl.z, yaw=pl.yaw;
     if(np && frac>0){
-      // don't glide a player across the map on a teleport
-      if(Math.hypot(np.x-pl.x, np.y-pl.y) <= MAX_LERP_DIST){
+      if(levelOf(M.map,pl.z)!==levelOf(M.map,np.z)){
+        // changing level between samples: never glide between panels
+        const src = frac<0.5 ? pl : np;
+        x=src.x; y=src.y; z=src.z;
+      } else if(Math.hypot(np.x-pl.x, np.y-pl.y) <= MAX_LERP_DIST){
+        // don't glide a player across the map on a teleport
         x=lerp(pl.x,np.x,frac); y=lerp(pl.y,np.y,frac);
       }
       if(pl.yaw!=null && np.yaw!=null) yaw=lerpAngle(pl.yaw,np.yaw,frac);
     }
-    const p=worldToPx(x,y);
+    const p=worldToPx(x,y,z);
     const isT=(pl.t||"").toString().toUpperCase().startsWith("T");
     const alive=pl.a!==false && (pl.hp==null||pl.hp>0);
     const col = alive ? (isT?getCSS('--t'):getCSS('--ct')) : (isT?getCSS('--t-dead'):getCSS('--ct-dead'));
@@ -1887,7 +1937,7 @@ function draw(){
   if(curTick!=null){
     (M.kills||[]).forEach(k=>{
       if(k.tick==null || k.vx==null) return;
-      if(k.tick>lastTick && k.tick<=curTick) killMarks.push({x:k.vx,y:k.vy,born:now});
+      if(k.tick>lastTick && k.tick<=curTick) killMarks.push({x:k.vx,y:k.vy,z:k.vz,born:now});
     });
     lastTick = curTick;
   }
@@ -2696,7 +2746,7 @@ function drawShots(curTick){
     if(age<0) break;                    // sorted, so nothing later has happened
     const fresh = age<=hot ? 1-age/hot : 0;
     const alpha = SHOT_DIM + fresh*(1-SHOT_DIM);
-    const a=worldToPx(sh.x,sh.y);
+    const a=worldToPx(sh.x,sh.y,sh.z);
     // A shot that CONNECTED has a known endpoint - whoever it hit - so it is
     // drawn to them and stops there. A MISS does not: the demo carries no
     // impact event and no collision geometry, so where it actually stopped is
@@ -2705,13 +2755,13 @@ function drawShots(curTick){
     // than twice the median engagement distance (637u), which is why every
     // tracer looked like it went through people and walls alike.
     let b;
-    if(sh.ex!=null){
-      b=worldToPx(sh.ex,sh.ey);
+    if(sh.ex!=null && levelOf(M.map,sh.ez)===levelOf(M.map,sh.z)){
+      b=worldToPx(sh.ex,sh.ey,sh.ez);
     }else{
       // Source yaw: 0 is +X, counter-clockwise. Canvas y grows downward, so the
       // sine is negated - the same correction the view cones use.
       const rad=sh.a*Math.PI/180;
-      b=worldToPx(sh.x+Math.cos(rad)*SHOT_MISS, sh.y+Math.sin(rad)*SHOT_MISS);
+      b=worldToPx(sh.x+Math.cos(rad)*SHOT_MISS, sh.y+Math.sin(rad)*SHOT_MISS, sh.z);
     }
     const mine = sh.by===povName;
     octx.globalAlpha = alpha * (sh.h ? 0.95 : 0.5);

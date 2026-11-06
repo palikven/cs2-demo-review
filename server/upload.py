@@ -276,8 +276,13 @@ _HINTS = (
 )
 
 
+# The parser colours its errors for a terminal. In a browser that is just noise.
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
 def explain(raw):
     """A parser error in words, keeping the original for the bug report."""
+    raw = _ANSI.sub("", raw or "")
     for needle, plain in _HINTS:
         if needle.lower() in (raw or "").lower():
             return f"{plain}  ({raw.strip()[:120]})"

@@ -12,7 +12,21 @@
  "de_nuke": {
   "pos_x": -3453,
   "pos_y": 2887,
-  "scale": 7
+  "scale": 7,
+  "floors": [
+   {
+    "name": "upper",
+    "img": "de_nuke.png",
+    "min": -495,
+    "max": 10000
+   },
+   {
+    "name": "lower",
+    "img": "de_nuke_lower.png",
+    "min": -10000,
+    "max": -495
+   }
+  ]
  },
  "de_ancient": {
   "pos_x": -2953,
@@ -32,7 +46,21 @@
  "de_train": {
   "pos_x": -2308,
   "pos_y": 2078,
-  "scale": 4.082077
+  "scale": 4.082077,
+  "floors": [
+   {
+    "name": "upper",
+    "img": "de_train.png",
+    "min": -50,
+    "max": 20000
+   },
+   {
+    "name": "lower",
+    "img": "de_train_lower.png",
+    "min": -5000,
+    "max": -50
+   }
+  ]
  },
  "de_overpass": {
   "pos_x": -4831,
@@ -42,6 +70,20 @@
  "de_vertigo": {
   "pos_x": -3168,
   "pos_y": 1762,
-  "scale": 4
+  "scale": 4,
+  "floors": [
+   {
+    "name": "upper",
+    "img": "de_vertigo.png",
+    "min": 11700,
+    "max": 20000
+   },
+   {
+    "name": "lower",
+    "img": "de_vertigo_lower.png",
+    "min": -10000,
+    "max": 11700
+   }
+  ]
  }
 }

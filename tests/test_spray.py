@@ -212,14 +212,16 @@ class TestPositionLookup:
 
     def _frames(self):
         return {
-            100: [{"n": "a", "x": 0.0, "y": 0.0}, {"n": "b", "x": 50.0, "y": 5.0}],
-            132: [{"n": "a", "x": 10.0, "y": 0.0}, {"n": "b", "x": 60.0, "y": 5.0}],
+            100: [{"n": "a", "x": 0.0, "y": 0.0, "z": -600.0},
+                  {"n": "b", "x": 50.0, "y": 5.0, "z": 0.0}],
+            132: [{"n": "a", "x": 10.0, "y": 0.0, "z": -600.0},
+                  {"n": "b", "x": 60.0, "y": 5.0, "z": 0.0}],
         }
 
     def test_it_returns_the_named_player_not_the_first_one(self):
         import parse_demo
         f = self._frames()
-        assert parse_demo.position_at(f, sorted(f), "b", 100) == (50.0, 5.0)
+        assert parse_demo.position_at(f, sorted(f), "b", 100) == (50.0, 5.0, 0.0)
 
     def test_it_falls_back_to_a_neighbouring_sample(self):
         """
@@ -236,10 +238,16 @@ class TestPositionLookup:
         import parse_demo
         f = self._frames()
         last = sorted(f)[-1]
-        assert parse_demo.position_at(f, sorted(f), "a", last + 20) == (10.0, 0.0)
+        assert parse_demo.position_at(f, sorted(f), "a", last + 20) == (10.0, 0.0, -600.0)
         # and between two samples, which must also resolve
         assert parse_demo.position_at(f, sorted(f), "a", 118) in (
-            (0.0, 0.0), (10.0, 0.0))
+            (0.0, 0.0, -600.0), (10.0, 0.0, -600.0))
+
+    def test_a_sample_without_altitude_says_so_rather_than_guessing(self):
+        """Altitude is None when the sample has none - never a made-up floor."""
+        import parse_demo
+        f = {100: [{"n": "a", "x": 1.0, "y": 2.0}]}
+        assert parse_demo.position_at(f, [100], "a", 100) == (1.0, 2.0, None)
 
     def test_an_unknown_player_is_none_not_a_guess(self):
         import parse_demo

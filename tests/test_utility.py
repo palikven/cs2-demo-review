@@ -103,6 +103,16 @@ class TestTimedUtility:
     def test_entries_without_a_position_are_dropped(self, stats_mod):
         assert stats_mod.timed_utility([self._row(X=None)], 18, [], 64) == []
 
+    def test_the_detonation_altitude_is_kept_not_the_throwers(self, stats_mod):
+        """A smoke on the lower level has to say so, or it is drawn on the upper panel."""
+        out = stats_mod.timed_utility([self._row(Z=-640.0, thrower_Z=-416.0)],
+                                      18, self._rounds(), 64)
+        assert out[0]["z"] == -640.0
+
+    def test_a_missing_altitude_stays_missing(self, stats_mod):
+        out = stats_mod.timed_utility([self._row()], 18, self._rounds(), 64)
+        assert "z" not in out[0]
+
     def test_empty_input_is_not_an_error(self, stats_mod):
         assert stats_mod.timed_utility([], 18, [], 64) == []
 

@@ -47,6 +47,14 @@ pip install -r requirements.txt
 ```
 Python ≥ 3.11 required (awpy needs it).
 
+The radars and the level ranges for the pool maps are already in the repo. After
+a CS2 update, re-run the extractor against your own install (`pip install vpk
+pillow` first). It rewrites only the radars whose picture actually changed.
+
+```bash
+python tools/extract_radars.py
+```
+
 ## Use it
 
 **Just upload your demo.** Start the server, open the viewer, and hit
@@ -63,6 +71,12 @@ The viewer opens your **most recently parsed match**, and the dropdown in the
 header switches between them — no need to know the `?match=` URL. With nothing
 parsed at all it falls back to a one-round sample and says so, rather than
 looking like a broken app.
+
+**Maps with two levels** (Nuke, Train, Vertigo) are drawn as two panels side by
+side, upper on the left and lower on the right. From above the levels sit on top
+of each other, so one radar hides whoever is downstairs. Each player is placed on
+the level their altitude falls in, using the ranges in the game's own overview
+files, and callouts and kills follow the same rule.
 
 If a demo was uploaded without a name, the viewer asks **which of these is you**
 and lists the ten players. That matters more than it sounds: with no POV the
@@ -635,4 +649,7 @@ shouldn't be presented as one.
 
 **Maps beyond the nine.** Callouts are derived from the demo itself, so the
 analysis already generalises to anything awpy can parse. What's missing for a
-new map is only the radar image and its calibration entry.
+new map is its radar and calibration entry, which `tools/extract_radars.py`
+writes from the install once the map is added to its `POOL` list. A map with no
+radar still gets the full review and the team panels; it shows the message
+"radar image missing" where the map would be.
